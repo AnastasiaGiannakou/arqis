@@ -31,6 +31,60 @@ select {
 
 .app {
   min-height: 100vh;
+  display: none;
+}
+
+body.entered .app {
+  display: block;
+}
+
+.entry-screen {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background:
+    linear-gradient(rgba(247, 248, 245, 0.82), rgba(231, 235, 229, 0.92)),
+    repeating-linear-gradient(90deg, rgba(24, 32, 29, 0.04) 0 1px, transparent 1px 80px),
+    repeating-linear-gradient(0deg, rgba(24, 32, 29, 0.04) 0 1px, transparent 1px 80px);
+}
+
+body.entered .entry-screen {
+  display: none;
+}
+
+.entry-logo {
+  display: grid;
+  gap: 10px;
+  place-items: center;
+  width: min(420px, 82vw);
+  aspect-ratio: 1.9;
+  border: 1px solid rgba(24, 32, 29, 0.14);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--green-dark);
+  box-shadow: 0 22px 70px rgba(24, 32, 29, 0.14);
+  cursor: pointer;
+}
+
+.entry-logo span {
+  font-size: clamp(48px, 10vw, 92px);
+  font-weight: 850;
+  line-height: 0.95;
+}
+
+.entry-logo small {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.entry-logo:hover,
+.entry-logo:focus-visible {
+  border-color: var(--green);
+  outline: 3px solid rgba(29, 107, 79, 0.18);
+  outline-offset: 4px;
 }
 
 .workspace {
