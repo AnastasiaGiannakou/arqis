@@ -115,11 +115,32 @@ function clearPlan() {
   fileStatus.textContent = "No plan uploaded yet";
 }
 
-function showPlan(file) {
+function findEmbeddedPng(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  const ending = [73, 69, 78, 68, 174, 66, 96, 130];
+
+  for (let index = 0; index < bytes.length - signature.length; index += 1) {
+    const startsPng = signature.every((value, offset) => bytes[index + offset] === value);
+    if (!startsPng) continue;
+
+    for (let end = index + signature.length; end < bytes.length - ending.length; end += 1) {
+      const endsPng = ending.every((value, offset) => bytes[end + offset] === value);
+      if (endsPng) {
+        return bytes.slice(index, end + ending.length);
+      }
+    }
+  }
+
+  return null;
+}
+
+async function showPlan(file) {
   if (!file) return;
   if (planObjectUrl) URL.revokeObjectURL(planObjectUrl);
 
   const sizeMb = file.size / 1024 / 1024;
+  const extension = file.name.split(".").pop().toLowerCase();
   fileStatus.textContent = `${file.name} selected (${sizeMb.toFixed(2)} MB)`;
   planPreview.hidden = false;
   planPreviewBody.replaceChildren();
@@ -131,6 +152,19 @@ function showPlan(file) {
     image.alt = "Uploaded architectural plan preview";
     planPreviewBody.append(image);
     return;
+  }
+
+  if (extension === "dwg") {
+    const embeddedPng = findEmbeddedPng(await file.arrayBuffer());
+    if (embeddedPng) {
+      const blob = new Blob([embeddedPng], { type: "image/png" });
+      planObjectUrl = URL.createObjectURL(blob);
+      const image = document.createElement("img");
+      image.src = planObjectUrl;
+      image.alt = "Embedded DWG drawing preview";
+      planPreviewBody.append(image);
+      return;
+    }
   }
 
   const card = document.createElement("div");
