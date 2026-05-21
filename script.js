@@ -87,8 +87,9 @@ function calculate() {
   document.querySelector("#totalCost").textContent = money.format(totalCost);
   document.querySelector("#tileHeight").disabled = activeMode() !== "custom";
 
+  const roomLabel = selectedRoomName.textContent === "No room selected" ? "the current manual dimensions" : selectedRoomName.textContent;
   const modeText = activeMode() === "full" ? "floor-to-ceiling" : activeMode() === "half" ? "half-height" : `${tileHeight.toFixed(2)}m high`;
-  document.querySelector("#summaryText").textContent = `${product.name} selected for ${selectedRoomName.textContent}. The estimate uses ${modeText} wall tiling, ${Math.round(waste * 100)}% waste, ${boxes} boxes, materials, labour, and listed extras.`;
+  document.querySelector("#summaryText").textContent = `${product.name} selected for ${roomLabel}. The estimate uses ${modeText} wall tiling, ${Math.round(waste * 100)}% waste, ${boxes} boxes, materials, labour, and listed extras.`;
 }
 
 function cadUnitFactor() {
@@ -132,6 +133,32 @@ function normalisePoints(points) {
   }));
 }
 
+function renderEmptyRoomState(label = "No rooms extracted") {
+  detectedRooms = [];
+  roomTabs.replaceChildren();
+  const tab = document.createElement("button");
+  tab.className = "room-tab active";
+  tab.type = "button";
+  tab.textContent = label;
+  roomTabs.append(tab);
+
+  const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  text.setAttribute("x", "210");
+  text.setAttribute("y", "140");
+  text.setAttribute("text-anchor", "middle");
+  text.setAttribute("fill", "#65736c");
+  text.setAttribute("font-size", "16");
+  text.setAttribute("font-weight", "700");
+  text.textContent = "Room outline will appear here";
+  roomOutline.replaceChildren(text);
+
+  selectedRoomName.textContent = "No room selected";
+  selectedRoomArea.textContent = "--";
+  selectedRoomFeet.textContent = "--";
+  roomTitle.textContent = "Plan preview";
+  calculate();
+}
+
 function renderRoom(index = 0) {
   const room = detectedRooms[index];
   if (!room) return;
@@ -165,11 +192,8 @@ function renderRooms(shapes) {
     .filter((room) => Number.isFinite(room.areaM2) && room.areaM2 > 0);
 
   if (!detectedRooms.length) {
-    detectedRooms = [{
-      name: "Bathroom 1",
-      points: [{ x: 0, y: 0 }, { x: 3200, y: 0 }, { x: 3200, y: 2400 }, { x: 0, y: 2400 }],
-      areaM2: 7.68
-    }];
+    renderEmptyRoomState();
+    return;
   }
 
   roomTabs.replaceChildren();
@@ -373,7 +397,7 @@ async function showPlan(file) {
     } else {
       planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>DWG uploaded.</span></div>`;
     }
-    showCadAnalysis({ status: "DWG preview loaded", message: "DWG room extraction needs the next backend conversion step. DXF closed room outlines are measurable now.", shapes: [] });
+    showCadAnalysis({ status: "DWG preview loaded", message: "Arqis has the DWG preview. Room-by-room extraction needs the backend DWG conversion stage, so no room areas are calculated from this DWG yet.", shapes: [] });
     return;
   }
 
