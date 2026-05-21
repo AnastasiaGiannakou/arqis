@@ -272,6 +272,7 @@ select {
 }
 
 .topbar,
+.cad-analysis,
 .quote,
 .results {
   max-width: 1080px;
@@ -492,6 +493,55 @@ h2 {
   gap: 12px;
 }
 
+.cad-analysis {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(420px, 1.2fr);
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.cad-analysis[hidden] {
+  display: none;
+}
+
+.cad-analysis h3 {
+  margin-bottom: 6px;
+  font-size: 18px;
+}
+
+.cad-analysis p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.cad-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cad-metrics article {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.cad-metrics span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cad-metrics strong {
+  font-size: 19px;
+}
+
 .results article {
   display: grid;
   gap: 5px;
@@ -565,6 +615,7 @@ dd {
   }
 
   .results,
+  .cad-analysis,
   .quote {
     grid-template-columns: 1fr 1fr;
   }
@@ -576,11 +627,20 @@ dd {
   .quote {
     grid-template-columns: 1fr;
   }
+
+  .cad-analysis {
+    grid-template-columns: 1fr;
+  }
+
+  .cad-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 560px) {
   .two,
-  .results {
+  .results,
+  .cad-metrics {
     grid-template-columns: 1fr;
   }
 
