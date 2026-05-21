@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arqis Bathroom Estimator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <section class="workspace">
+      <aside class="panel controls" aria-label="Estimate controls">
+        <div class="brand">
+          <span class="mark">N</span>
+          <div>
+            <h1>Arqis</h1>
+            <p>Bathroom tiling estimate</p>
+          </div>
+        </div>
+
+        <form id="estimateForm">
+          <fieldset>
+            <legend>Plan upload</legend>
+            <label class="upload-box" for="planFile">
+              <span>Upload plan</span>
+              <small>PDF, image, DXF, or DWG</small>
+              <input id="planFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.dxf,.dwg">
+            </label>
+            <p class="file-status" id="fileStatus">No plan uploaded yet</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Room</legend>
+            <div class="grid two">
+              <label>
+                Length (m)
+                <input id="length" type="number" min="0.5" step="0.1" value="3.2">
+              </label>
+              <label>
+                Width (m)
+                <input id="width" type="number" min="0.5" step="0.1" value="2.4">
+              </label>
+              <label>
+                Ceiling (m)
+                <input id="height" type="number" min="1.8" step="0.1" value="2.4">
+              </label>
+              <label>
+                Waste (%)
+                <input id="waste" type="number" min="0" step="1" value="10">
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Tiling</legend>
+            <div class="segmented" role="group" aria-label="Tiling height">
+              <input id="modeFull" name="tileMode" type="radio" value="full" checked>
+              <label for="modeFull">Full</label>
+              <input id="modeHalf" name="tileMode" type="radio" value="half">
+              <label for="modeHalf">Half</label>
+              <input id="modeCustom" name="tileMode" type="radio" value="custom">
+              <label for="modeCustom">Custom</label>
+            </div>
+            <label class="custom-height">
+              Tile height (m)
+              <input id="tileHeight" type="number" min="0.1" step="0.1" value="2.4">
+            </label>
+            <label class="check">
+              <input id="tileFloor" type="checkbox" checked>
+              Include floor tiling
+            </label>
+            <label class="check">
+              <input id="tileWalls" type="checkbox" checked>
+              Include wall tiling
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Openings</legend>
+            <div class="grid two">
+              <label>
+                Doors
+                <input id="doors" type="number" min="0" step="1" value="1">
+              </label>
+              <label>
+                Door area each (m²)
+                <input id="doorArea" type="number" min="0" step="0.1" value="1.6">
+              </label>
+              <label>
+                Windows
+                <input id="windows" type="number" min="0" step="1" value="1">
+              </label>
+              <label>
+                Window area each (m²)
+                <input id="windowArea" type="number" min="0" step="0.1" value="0.6">
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Product and labour</legend>
+            <label>
+              Tile / finish
+              <select id="product">
+                <option value="42|1.08|Metro porcelain|#c9d7d5">Metro porcelain - £42/m²</option>
+                <option value="58|1.20|Marble effect ceramic|#e7e0d2">Marble effect ceramic - £58/m²</option>
+                <option value="76|0.96|Stone textured slab|#879187">Stone textured slab - £76/m²</option>
+                <option value="34|1.44|Simple white gloss|#f2f4f1">Simple white gloss - £34/m²</option>
+              </select>
+            </label>
+            <div class="grid two">
+              <label>
+                Labour (£/m²)
+                <input id="labour" type="number" min="0" step="1" value="45">
+              </label>
+              <label>
+                Extras (£)
+                <input id="extras" type="number" min="0" step="10" value="180">
+              </label>
+            </div>
+          </fieldset>
+        </form>
+      </aside>
+
+      <section class="stage" aria-label="Estimate preview">
+        <div class="topbar">
+          <div>
+            <p class="eyebrow">Client quote preview</p>
+            <h2 id="roomTitle">Bathroom 1</h2>
+          </div>
+          <button type="button" id="printBtn" title="Print quote">Print</button>
+        </div>
+
+        <div class="preview-wrap">
+          <div class="plan-preview" id="planPreview" hidden>
+            <div class="plan-preview-head">
+              <span>Uploaded plan</span>
+              <button type="button" id="clearPlanBtn" title="Remove uploaded plan">Clear</button>
+            </div>
+            <div class="plan-preview-body" id="planPreviewBody"></div>
+          </div>
+          <div class="room3d" id="room3d" aria-label="Simple 3D bathroom preview">
+            <div class="wall wall-left"></div>
+            <div class="wall wall-back">
+              <div class="tile-zone"></div>
+              <div class="window"></div>
+              <div class="shower"></div>
+            </div>
+            <div class="floor"></div>
+            <div class="vanity"></div>
+            <div class="toilet"></div>
+          </div>
+        </div>
+
+        <div class="results" aria-live="polite">
+          <article>
+            <span>Floor area</span>
+            <strong id="floorArea">0 m²</strong>
+          </article>
+          <article>
+            <span>Wall tile area</span>
+            <strong id="wallArea">0 m²</strong>
+          </article>
+          <article>
+            <span>Total with waste</span>
+            <strong id="totalArea">0 m²</strong>
+          </article>
+          <article>
+            <span>Boxes required</span>
+            <strong id="boxes">0</strong>
+          </article>
+        </div>
+
+        <section class="quote">
+          <div>
+            <h3>Estimate summary</h3>
+            <p id="summaryText"></p>
+          </div>
+          <dl>
+            <div>
+              <dt>Materials</dt>
+              <dd id="materialCost">£0</dd>
+            </div>
+            <div>
+              <dt>Labour</dt>
+              <dd id="labourCost">£0</dd>
+            </div>
+            <div>
+              <dt>Extras</dt>
+              <dd id="extrasCost">£0</dd>
+            </div>
+            <div class="total">
+              <dt>Total estimate</dt>
+              <dd id="totalCost">£0</dd>
+            </div>
+          </dl>
+        </section>
+      </section>
+    </section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
