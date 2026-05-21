@@ -5,12 +5,17 @@ const planPreview = document.querySelector("#planPreview");
 const planPreviewBody = document.querySelector("#planPreviewBody");
 const fileStatus = document.querySelector("#fileStatus");
 const clearPlanBtn = document.querySelector("#clearPlanBtn");
+const enterAppBtn = document.querySelector("#enterAppBtn");
 const money = new Intl.NumberFormat("en-GB", {
   style: "currency",
   currency: "GBP",
   maximumFractionDigits: 0
 });
 let planObjectUrl = "";
+
+function enterApp() {
+  document.body.classList.add("entered");
+}
 
 function numberValue(id) {
   return Number(document.querySelector(`#${id}`).value) || 0;
@@ -179,5 +184,6 @@ async function showPlan(file) {
 
 planFile.addEventListener("change", () => showPlan(planFile.files[0]));
 clearPlanBtn.addEventListener("click", clearPlan);
+enterAppBtn.addEventListener("click", enterApp);
 
 calculate();
