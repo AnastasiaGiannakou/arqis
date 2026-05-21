@@ -33,6 +33,8 @@
               <small>PDF, image, DXF, or DWG</small>
               <input id="planFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.dxf,.dwg">
             </label>
+            <button class="sample-btn" id="sampleDxfBtn" type="button">Try sample DXF room</button>
+            <p class="upload-note">DXF files can be measured now when rooms are drawn as closed polylines. DWG files show a preview first; automatic DWG measuring needs the conversion stage next.</p>
             <label>
               CAD drawing units
               <select id="cadUnits">
@@ -169,11 +171,11 @@
           </div>
         </div>
 
-        <section class="cad-analysis" id="cadAnalysis" hidden>
+        <section class="cad-analysis" id="cadAnalysis">
           <div>
             <p class="eyebrow">CAD analysis</p>
-            <h3 id="cadStatus">No CAD file analysed</h3>
-            <p id="cadMessage"></p>
+            <h3 id="cadStatus">Upload a CAD file to begin</h3>
+            <p id="cadMessage">Arqis will preview uploaded plans and calculate areas from DXF files that contain closed room outlines.</p>
           </div>
           <div class="cad-metrics">
             <article>
