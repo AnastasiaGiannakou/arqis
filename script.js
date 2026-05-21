@@ -347,17 +347,30 @@ function loadSampleDxf() {
   planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>Sample DXF rooms</strong><span>Bathroom 1, Kitchen, and Bedroom 1 are closed CAD room outlines.</span><span>Click each room tab to see the outline and size.</span></div>`;
 }
 
-function findEmbeddedPng(buffer) {
-  const bytes = new Uint8Array(buffer);
-  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
-  const ending = [73, 69, 78, 68, 174, 66, 96, 130];
-  for (let index = 0; index < bytes.length - signature.length; index += 1) {
-    if (!signature.every((value, offset) => bytes[index + offset] === value)) continue;
-    for (let end = index + signature.length; end < bytes.length - ending.length; end += 1) {
-      if (ending.every((value, offset) => bytes[end + offset] === value)) return bytes.slice(index, end + ending.length);
-    }
-  }
-  return null;
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("The file could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function analysePlanOnBackend(file) {
+  const extension = file.name.split(".").pop().toLowerCase();
+  const base64 = await fileToBase64(file);
+  const response = await fetch("/api/analyse-plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName: file.name, extension, base64 })
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) throw new Error(result.message || "The backend could not analyse this plan.");
+  return result;
+}
+
+function renderPlanCard(file, message) {
+  planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>${message}</span></div>`;
 }
 
 async function showPlan(file) {
@@ -368,15 +381,8 @@ async function showPlan(file) {
   fileStatus.textContent = `${file.name} selected (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
   planPreviewBody.replaceChildren();
 
-  if (extension === "dxf") {
-    analyseDxfText(await file.text());
-    planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>DXF uploaded and checked for closed room outlines.</span></div>`;
-    return;
-  }
-
   if (file.type.startsWith("image/")) {
     planObjectUrl = URL.createObjectURL(file);
-    planPreviewBody.innerHTML = "";
     const image = document.createElement("img");
     image.src = planObjectUrl;
     image.alt = "Uploaded architectural plan preview";
@@ -385,24 +391,35 @@ async function showPlan(file) {
     return;
   }
 
-  if (extension === "dwg") {
-    const embeddedPng = findEmbeddedPng(await file.arrayBuffer());
-    if (embeddedPng) {
-      const blob = new Blob([embeddedPng], { type: "image/png" });
-      planObjectUrl = URL.createObjectURL(blob);
+  fileStatus.textContent = `Analysing ${file.name} on the backend...`;
+  showCadAnalysis({ status: "Backend analysis running", message: "Arqis is sending the CAD file to the server so conversion and room extraction can happen outside the browser.", shapes: [] });
+
+  try {
+    const result = await analysePlanOnBackend(file);
+    fileStatus.textContent = `${file.name} analysed on the backend`;
+
+    if (result.previewDataUrl) {
       const image = document.createElement("img");
-      image.src = planObjectUrl;
+      image.src = result.previewDataUrl;
       image.alt = "Embedded DWG drawing preview";
       planPreviewBody.append(image);
     } else {
-      planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>DWG uploaded.</span></div>`;
+      const message = extension === "dxf"
+        ? "DXF uploaded to the backend and checked for closed room outlines."
+        : `${extension.toUpperCase()} uploaded to the backend for measurement reference.`;
+      renderPlanCard(file, message);
     }
-    showCadAnalysis({ status: "DWG preview loaded", message: "Arqis has the DWG preview. Room-by-room extraction needs the backend DWG conversion stage, so no room areas are calculated from this DWG yet.", shapes: [] });
-    return;
-  }
 
-  planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>${extension.toUpperCase()} uploaded for measurement reference.</span></div>`;
-  showCadAnalysis({ status: `${extension.toUpperCase()} uploaded`, message: "This file can be stored as a plan reference. Automatic room extraction is currently working first from DXF files.", shapes: [] });
+    showCadAnalysis({
+      status: result.status || "Backend analysis complete",
+      message: result.message || "The backend checked this plan.",
+      shapes: result.shapes || []
+    });
+  } catch (error) {
+    fileStatus.textContent = `${file.name} could not be analysed`;
+    renderPlanCard(file, "The file was received in the browser, but backend analysis did not complete.");
+    showCadAnalysis({ status: "Backend analysis failed", message: error.message, shapes: [] });
+  }
 }
 
 function clearPlan(resetText = true) {
