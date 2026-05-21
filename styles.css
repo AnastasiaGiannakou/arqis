@@ -403,7 +403,8 @@ h2 {
 .plan-file-card strong {
   color: var(--ink);
   overflow-wrap: anywhere;
-}\n
+}
+
 .room3d {
   position: relative;
   width: min(760px, 92vw);
