@@ -1,13 +1,11 @@
-const form = document.querySelector("#estimateForm");
+const form = document.querySelector(".controls");
 const fields = [...form.querySelectorAll("input, select")];
 const planFile = document.querySelector("#planFile");
-const planPreview = document.querySelector("#planPreview");
 const planPreviewBody = document.querySelector("#planPreviewBody");
 const fileStatus = document.querySelector("#fileStatus");
 const clearPlanBtn = document.querySelector("#clearPlanBtn");
 const enterAppBtn = document.querySelector("#enterAppBtn");
 const sampleDxfBtn = document.querySelector("#sampleDxfBtn");
-const cadAnalysis = document.querySelector("#cadAnalysis");
 const cadStatus = document.querySelector("#cadStatus");
 const cadMessage = document.querySelector("#cadMessage");
 const cadShapeCount = document.querySelector("#cadShapeCount");
@@ -15,13 +13,17 @@ const cadLargestArea = document.querySelector("#cadLargestArea");
 const cadTotalArea = document.querySelector("#cadTotalArea");
 const cadTotalFeet = document.querySelector("#cadTotalFeet");
 const cadUnits = document.querySelector("#cadUnits");
-const money = new Intl.NumberFormat("en-GB", {
-  style: "currency",
-  currency: "GBP",
-  maximumFractionDigits: 0
-});
+const roomTabs = document.querySelector("#roomTabs");
+const roomOutline = document.querySelector("#roomOutline");
+const selectedRoomName = document.querySelector("#selectedRoomName");
+const selectedRoomArea = document.querySelector("#selectedRoomArea");
+const selectedRoomFeet = document.querySelector("#selectedRoomFeet");
+const roomTitle = document.querySelector("#roomTitle");
+
+const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 let planObjectUrl = "";
 let lastDxfText = "";
+let detectedRooms = [];
 
 function enterApp() {
   document.body.classList.add("entered");
@@ -36,13 +38,8 @@ function activeMode() {
 }
 
 function productDetails() {
-  const [price, boxCoverage, name, colour] = document.querySelector("#product").value.split("|");
-  return {
-    price: Number(price),
-    boxCoverage: Number(boxCoverage),
-    name,
-    colour
-  };
+  const [price, boxCoverage, name] = document.querySelector("#product").value.split("|");
+  return { price: Number(price), boxCoverage: Number(boxCoverage), name };
 }
 
 function getTileHeight(roomHeight) {
@@ -71,10 +68,9 @@ function calculate() {
   const tileHeight = getTileHeight(height);
   const perimeter = (length + width) * 2;
   const openingDeductions = (doors * doorArea) + (windows * windowArea);
-  const rawWallArea = Math.max(0, (perimeter * tileHeight) - openingDeductions);
+  const wallArea = includeWalls ? Math.max(0, (perimeter * tileHeight) - openingDeductions) : 0;
   const selectedFloorArea = includeFloor ? floorArea : 0;
-  const selectedWallArea = includeWalls ? rawWallArea : 0;
-  const totalArea = selectedFloorArea + selectedWallArea;
+  const totalArea = selectedFloorArea + wallArea;
   const totalWithWaste = totalArea * (1 + waste);
   const boxes = product.boxCoverage > 0 ? Math.ceil(totalWithWaste / product.boxCoverage) : 0;
   const materialCost = totalWithWaste * product.price;
@@ -82,88 +78,21 @@ function calculate() {
   const totalCost = materialCost + labourCost + extras;
 
   document.querySelector("#floorArea").textContent = `${floorArea.toFixed(2)} m²`;
-  document.querySelector("#wallArea").textContent = `${selectedWallArea.toFixed(2)} m²`;
+  document.querySelector("#wallArea").textContent = `${wallArea.toFixed(2)} m²`;
   document.querySelector("#totalArea").textContent = `${totalWithWaste.toFixed(2)} m²`;
   document.querySelector("#boxes").textContent = `${boxes}`;
   document.querySelector("#materialCost").textContent = money.format(materialCost);
   document.querySelector("#labourCost").textContent = money.format(labourCost);
   document.querySelector("#extrasCost").textContent = money.format(extras);
   document.querySelector("#totalCost").textContent = money.format(totalCost);
-
-  const modeText = activeMode() === "full"
-    ? "full-height wall tiling"
-    : activeMode() === "half"
-      ? "half-height wall tiling"
-      : `${tileHeight.toFixed(2)}m custom-height wall tiling`;
-
-  document.querySelector("#summaryText").textContent =
-    `${product.name} selected for a ${length.toFixed(1)}m by ${width.toFixed(1)}m bathroom with ${modeText}. ` +
-    `The estimate includes ${Math.round(waste * 100)}% waste, ${boxes} boxes, materials, labour, and listed extras.`;
-
-  document.documentElement.style.setProperty("--tile", product.colour);
   document.querySelector("#tileHeight").disabled = activeMode() !== "custom";
 
-  const wallPercent = includeWalls ? Math.max(0, Math.min(100, (tileHeight / height) * 100)) : 0;
-  document.querySelector(".wall-back").style.background =
-    `linear-gradient(to bottom, rgba(255,255,255,0.7), rgba(255,255,255,0.2)),
-     linear-gradient(to top, var(--tile) 0 ${wallPercent}%, #eef0ea ${wallPercent}% 100%),
-     repeating-linear-gradient(90deg, transparent 0 48px, rgba(24,32,29,0.09) 48px 50px),
-     repeating-linear-gradient(0deg, transparent 0 32px, rgba(255,255,255,0.5) 32px 34px)`;
-  document.querySelector(".floor").style.opacity = includeFloor ? "1" : "0.28";
-}
-
-fields.forEach((field) => {
-  field.addEventListener("input", calculate);
-  field.addEventListener("change", calculate);
-});
-
-document.querySelector("#printBtn").addEventListener("click", () => window.print());
-
-function clearPlan() {
-  if (planObjectUrl) {
-    URL.revokeObjectURL(planObjectUrl);
-    planObjectUrl = "";
-  }
-  planFile.value = "";
-  planPreview.hidden = true;
-  planPreviewBody.replaceChildren();
-  fileStatus.textContent = "No plan uploaded yet";
-  lastDxfText = "";
-  showCadAnalysis({
-    status: "Upload a CAD file to begin",
-    message: "Arqis will preview uploaded plans and calculate areas from DXF files that contain closed room outlines.",
-    shapes: []
-  });
-}
-
-function findEmbeddedPng(buffer) {
-  const bytes = new Uint8Array(buffer);
-  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
-  const ending = [73, 69, 78, 68, 174, 66, 96, 130];
-
-  for (let index = 0; index < bytes.length - signature.length; index += 1) {
-    const startsPng = signature.every((value, offset) => bytes[index + offset] === value);
-    if (!startsPng) continue;
-
-    for (let end = index + signature.length; end < bytes.length - ending.length; end += 1) {
-      const endsPng = ending.every((value, offset) => bytes[end + offset] === value);
-      if (endsPng) {
-        return bytes.slice(index, end + ending.length);
-      }
-    }
-  }
-
-  return null;
+  const modeText = activeMode() === "full" ? "floor-to-ceiling" : activeMode() === "half" ? "half-height" : `${tileHeight.toFixed(2)}m high`;
+  document.querySelector("#summaryText").textContent = `${product.name} selected for ${selectedRoomName.textContent}. The estimate uses ${modeText} wall tiling, ${Math.round(waste * 100)}% waste, ${boxes} boxes, materials, labour, and listed extras.`;
 }
 
 function cadUnitFactor() {
-  return {
-    mm: 0.001,
-    cm: 0.01,
-    m: 1,
-    ft: 0.3048,
-    in: 0.0254
-  }[cadUnits.value] || 1;
+  return { mm: 0.001, cm: 0.01, m: 1, ft: 0.3048, in: 0.0254 }[cadUnits.value] || 1;
 }
 
 function polygonArea(points) {
@@ -175,6 +104,84 @@ function polygonArea(points) {
     sum += (current.x * next.y) - (next.x * current.y);
   }
   return Math.abs(sum) / 2;
+}
+
+function roomName(index) {
+  return ["Bathroom 1", "Kitchen", "Bedroom 1", "Bedroom 2", "Hall", "Room"][index] || `Room ${index + 1}`;
+}
+
+function normalisePoints(points) {
+  const width = 420;
+  const height = 280;
+  const padding = 28;
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(1, maxX - minX);
+  const spanY = Math.max(1, maxY - minY);
+  const scale = Math.min((width - padding * 2) / spanX, (height - padding * 2) / spanY);
+  const offsetX = (width - spanX * scale) / 2;
+  const offsetY = (height - spanY * scale) / 2;
+
+  return points.map((point) => ({
+    x: offsetX + (point.x - minX) * scale,
+    y: height - (offsetY + (point.y - minY) * scale)
+  }));
+}
+
+function renderRoom(index = 0) {
+  const room = detectedRooms[index];
+  if (!room) return;
+
+  roomTabs.querySelectorAll(".room-tab").forEach((tab, tabIndex) => {
+    tab.classList.toggle("active", tabIndex === index);
+  });
+
+  const points = normalisePoints(room.points);
+  const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  polygon.setAttribute("points", points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
+  roomOutline.replaceChildren(polygon);
+
+  selectedRoomName.textContent = room.name;
+  selectedRoomArea.textContent = `${room.areaM2.toFixed(2)} m²`;
+  selectedRoomFeet.textContent = `${(room.areaM2 * 10.7639).toFixed(2)} ft²`;
+  roomTitle.textContent = room.name;
+
+  const xs = room.points.map((point) => point.x);
+  const ys = room.points.map((point) => point.y);
+  const factor = cadUnitFactor();
+  document.querySelector("#length").value = ((Math.max(...xs) - Math.min(...xs)) * factor).toFixed(2);
+  document.querySelector("#width").value = ((Math.max(...ys) - Math.min(...ys)) * factor).toFixed(2);
+  calculate();
+}
+
+function renderRooms(shapes) {
+  const factor = cadUnitFactor();
+  detectedRooms = shapes
+    .map((shape, index) => ({ name: roomName(index), points: shape.points, areaM2: shape.rawArea * factor * factor }))
+    .filter((room) => Number.isFinite(room.areaM2) && room.areaM2 > 0);
+
+  if (!detectedRooms.length) {
+    detectedRooms = [{
+      name: "Bathroom 1",
+      points: [{ x: 0, y: 0 }, { x: 3200, y: 0 }, { x: 3200, y: 2400 }, { x: 0, y: 2400 }],
+      areaM2: 7.68
+    }];
+  }
+
+  roomTabs.replaceChildren();
+  detectedRooms.forEach((room, index) => {
+    const tab = document.createElement("button");
+    tab.className = `room-tab${index === 0 ? " active" : ""}`;
+    tab.type = "button";
+    tab.textContent = room.name;
+    tab.addEventListener("click", () => renderRoom(index));
+    roomTabs.append(tab);
+  });
+  renderRoom(0);
 }
 
 function parseDxfPolylines(text) {
@@ -190,50 +197,17 @@ function parseDxfPolylines(text) {
       let flags = 0;
       let currentX = null;
       index += 2;
-
-      while (index < lines.length - 1 && !(lines[index] === "0")) {
-        const group = lines[index];
-        const item = lines[index + 1];
-        if (group === "70") flags = Number(item) || 0;
-        if (group === "10") currentX = Number(item);
-        if (group === "20" && currentX !== null) {
-          points.push({ x: currentX, y: Number(item) });
+      while (index < lines.length - 1 && lines[index] !== "0") {
+        if (lines[index] === "70") flags = Number(lines[index + 1]) || 0;
+        if (lines[index] === "10") currentX = Number(lines[index + 1]);
+        if (lines[index] === "20" && currentX !== null) {
+          points.push({ x: currentX, y: Number(lines[index + 1]) });
           currentX = null;
         }
         index += 2;
       }
-
-      if ((flags & 1) === 1 && points.length >= 3) {
-        shapes.push({ points, rawArea: polygonArea(points) });
-      }
+      if ((flags & 1) === 1 && points.length >= 3) shapes.push({ points, rawArea: polygonArea(points) });
       index -= 2;
-    }
-
-    if (code === "0" && value === "POLYLINE") {
-      const points = [];
-      let closed = false;
-      index += 2;
-
-      while (index < lines.length - 1 && !(lines[index] === "0" && lines[index + 1] === "SEQEND")) {
-        if (lines[index] === "70") closed = ((Number(lines[index + 1]) || 0) & 1) === 1;
-        if (lines[index] === "0" && lines[index + 1] === "VERTEX") {
-          let x = null;
-          let y = null;
-          index += 2;
-          while (index < lines.length - 1 && lines[index] !== "0") {
-            if (lines[index] === "10") x = Number(lines[index + 1]);
-            if (lines[index] === "20") y = Number(lines[index + 1]);
-            index += 2;
-          }
-          if (x !== null && y !== null) points.push({ x, y });
-          index -= 2;
-        }
-        index += 2;
-      }
-
-      if (closed && points.length >= 3) {
-        shapes.push({ points, rawArea: polygonArea(points) });
-      }
     }
   }
 
@@ -242,39 +216,26 @@ function parseDxfPolylines(text) {
 
 function showCadAnalysis({ status, message, shapes = [] }) {
   const factor = cadUnitFactor();
-  const areas = shapes
-    .map((shape) => shape.rawArea * factor * factor)
-    .filter((area) => Number.isFinite(area) && area > 0)
-    .sort((a, b) => b - a);
+  const areas = shapes.map((shape) => shape.rawArea * factor * factor).filter((area) => area > 0).sort((a, b) => b - a);
   const total = areas.reduce((sum, area) => sum + area, 0);
-  const largest = areas[0] || 0;
 
-  cadAnalysis.hidden = false;
   cadStatus.textContent = status;
   cadMessage.textContent = message;
   cadShapeCount.textContent = `${areas.length}`;
-  cadLargestArea.textContent = `${largest.toFixed(2)} m²`;
+  cadLargestArea.textContent = `${(areas[0] || 0).toFixed(2)} m²`;
   cadTotalArea.textContent = `${total.toFixed(2)} m²`;
   cadTotalFeet.textContent = `${(total * 10.7639).toFixed(2)} ft²`;
+  renderRooms(shapes);
 }
 
 function analyseDxfText(text) {
   lastDxfText = text;
   const shapes = parseDxfPolylines(text);
   if (!shapes.length) {
-    showCadAnalysis({
-      status: "DXF read, no closed room shapes found",
-      message: "Arqis could read the DXF file, but it did not find closed polylines yet. Closed room outlines are needed for automatic area calculation.",
-      shapes: []
-    });
+    showCadAnalysis({ status: "DXF read, no closed rooms found", message: "Arqis could read the DXF file, but it did not find closed room outlines yet.", shapes: [] });
     return;
   }
-
-  showCadAnalysis({
-    status: "DXF areas detected",
-    message: "Arqis found closed CAD shapes and calculated their areas using the selected drawing units. This is the first measurement pass and should be checked against the plan scale.",
-    shapes
-  });
+  showCadAnalysis({ status: "DXF rooms detected", message: "Each closed CAD outline is now shown as a room tab. Click a tab to see that room outline and size.", shapes });
 }
 
 function sampleDxf() {
@@ -305,49 +266,98 @@ LWPOLYLINE
 20
 2400
 0
+LWPOLYLINE
+90
+4
+70
+1
+10
+4200
+20
+0
+10
+9200
+20
+0
+10
+9200
+20
+3600
+10
+4200
+20
+3600
+0
+LWPOLYLINE
+90
+4
+70
+1
+10
+0
+20
+4600
+10
+4200
+20
+4600
+10
+4200
+20
+8100
+10
+0
+20
+8100
+0
 ENDSEC
 0
 EOF`;
 }
 
 function loadSampleDxf() {
-  clearPlan();
-  fileStatus.textContent = "Sample DXF room loaded (3.2m x 2.4m)";
+  clearPlan(false);
+  fileStatus.textContent = "Sample DXF rooms loaded";
   cadUnits.value = "mm";
   analyseDxfText(sampleDxf());
-  planPreview.hidden = false;
-  planPreviewBody.replaceChildren();
-  const card = document.createElement("div");
-  card.className = "plan-file-card";
-  card.innerHTML = `
-    <strong>Sample DXF room</strong>
-    <span>Closed CAD polyline: 3.2m by 2.4m.</span>
-    <span>Arqis has calculated this from CAD geometry.</span>
-  `;
-  planPreviewBody.append(card);
+  planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>Sample DXF rooms</strong><span>Bathroom 1, Kitchen, and Bedroom 1 are closed CAD room outlines.</span><span>Click each room tab to see the outline and size.</span></div>`;
+}
+
+function findEmbeddedPng(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  const ending = [73, 69, 78, 68, 174, 66, 96, 130];
+  for (let index = 0; index < bytes.length - signature.length; index += 1) {
+    if (!signature.every((value, offset) => bytes[index + offset] === value)) continue;
+    for (let end = index + signature.length; end < bytes.length - ending.length; end += 1) {
+      if (ending.every((value, offset) => bytes[end + offset] === value)) return bytes.slice(index, end + ending.length);
+    }
+  }
+  return null;
 }
 
 async function showPlan(file) {
   if (!file) return;
   if (planObjectUrl) URL.revokeObjectURL(planObjectUrl);
 
-  const sizeMb = file.size / 1024 / 1024;
   const extension = file.name.split(".").pop().toLowerCase();
-  fileStatus.textContent = `${file.name} selected (${sizeMb.toFixed(2)} MB)`;
-  planPreview.hidden = false;
+  fileStatus.textContent = `${file.name} selected (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
   planPreviewBody.replaceChildren();
+
+  if (extension === "dxf") {
+    analyseDxfText(await file.text());
+    planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>DXF uploaded and checked for closed room outlines.</span></div>`;
+    return;
+  }
 
   if (file.type.startsWith("image/")) {
     planObjectUrl = URL.createObjectURL(file);
+    planPreviewBody.innerHTML = "";
     const image = document.createElement("img");
     image.src = planObjectUrl;
     image.alt = "Uploaded architectural plan preview";
     planPreviewBody.append(image);
-    showCadAnalysis({
-      status: "Plan image previewed",
-      message: "This image can be used as a visual reference. The next image/PDF stage will let you trace room outlines so Arqis can calculate areas from the traced shape.",
-      shapes: []
-    });
+    showCadAnalysis({ status: "Plan image previewed", message: "Images can be used as visual references. Automatic measuring is currently working first from DXF closed room outlines.", shapes: [] });
     return;
   }
 
@@ -360,40 +370,33 @@ async function showPlan(file) {
       image.src = planObjectUrl;
       image.alt = "Embedded DWG drawing preview";
       planPreviewBody.append(image);
-      showCadAnalysis({
-        status: "DWG preview extracted",
-        message: "Arqis can show the embedded AutoCAD preview. To calculate areas from DWG files, the next backend stage will convert DWG to DXF and read the CAD geometry.",
-        shapes: []
-      });
-      return;
+    } else {
+      planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>DWG uploaded.</span></div>`;
     }
-    showCadAnalysis({
-      status: "DWG uploaded",
-      message: "Arqis received the AutoCAD file, but this DWG does not expose a usable embedded preview in the browser. Automatic DWG area calculation needs the backend conversion stage from DWG to DXF.",
-      shapes: []
-    });
+    showCadAnalysis({ status: "DWG preview loaded", message: "DWG room extraction needs the next backend conversion step. DXF closed room outlines are measurable now.", shapes: [] });
+    return;
   }
 
-  if (extension === "dxf") {
-    analyseDxfText(await file.text());
-  } else {
-    showCadAnalysis({
-      status: `${extension.toUpperCase()} measurement pending`,
-      message: "This file is uploaded as a plan reference. Automatic area extraction is currently being built first for DXF files.",
-      shapes: []
-    });
-  }
-
-  const card = document.createElement("div");
-  card.className = "plan-file-card";
-  card.innerHTML = `
-    <strong>${file.name}</strong>
-    <span>${file.name.split(".").pop().toUpperCase()} uploaded for measurement reference.</span>
-    <span>Automatic CAD/PDF measuring would be the next build stage.</span>
-  `;
-  planPreviewBody.append(card);
+  planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>${extension.toUpperCase()} uploaded for measurement reference.</span></div>`;
+  showCadAnalysis({ status: `${extension.toUpperCase()} uploaded`, message: "This file can be stored as a plan reference. Automatic room extraction is currently working first from DXF files.", shapes: [] });
 }
 
+function clearPlan(resetText = true) {
+  if (planObjectUrl) URL.revokeObjectURL(planObjectUrl);
+  planObjectUrl = "";
+  planFile.value = "";
+  lastDxfText = "";
+  if (resetText) fileStatus.textContent = "No plan uploaded yet";
+  planPreviewBody.innerHTML = "<p>Upload a plan or use the sample room file.</p>";
+  showCadAnalysis({ status: "Upload a CAD file to begin", message: "Arqis will show each closed CAD room outline as a tab and calculate the areas.", shapes: [] });
+}
+
+fields.forEach((field) => {
+  field.addEventListener("input", calculate);
+  field.addEventListener("change", calculate);
+});
+
+document.querySelector("#printBtn").addEventListener("click", () => window.print());
 planFile.addEventListener("change", () => showPlan(planFile.files[0]));
 clearPlanBtn.addEventListener("click", clearPlan);
 enterAppBtn.addEventListener("click", enterApp);
@@ -402,4 +405,4 @@ cadUnits.addEventListener("change", () => {
   if (lastDxfText) analyseDxfText(lastDxfText);
 });
 
-calculate();
+showCadAnalysis({ status: "Upload a CAD file to begin", message: "Arqis will show each closed CAD room outline as a tab and calculate the areas.", shapes: [] });
