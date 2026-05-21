@@ -6,12 +6,21 @@ const planPreviewBody = document.querySelector("#planPreviewBody");
 const fileStatus = document.querySelector("#fileStatus");
 const clearPlanBtn = document.querySelector("#clearPlanBtn");
 const enterAppBtn = document.querySelector("#enterAppBtn");
+const cadAnalysis = document.querySelector("#cadAnalysis");
+const cadStatus = document.querySelector("#cadStatus");
+const cadMessage = document.querySelector("#cadMessage");
+const cadShapeCount = document.querySelector("#cadShapeCount");
+const cadLargestArea = document.querySelector("#cadLargestArea");
+const cadTotalArea = document.querySelector("#cadTotalArea");
+const cadTotalFeet = document.querySelector("#cadTotalFeet");
+const cadUnits = document.querySelector("#cadUnits");
 const money = new Intl.NumberFormat("en-GB", {
   style: "currency",
   currency: "GBP",
   maximumFractionDigits: 0
 });
 let planObjectUrl = "";
+let lastDxfText = "";
 
 function enterApp() {
   document.body.classList.add("entered");
@@ -118,6 +127,8 @@ function clearPlan() {
   planPreview.hidden = true;
   planPreviewBody.replaceChildren();
   fileStatus.textContent = "No plan uploaded yet";
+  lastDxfText = "";
+  cadAnalysis.hidden = true;
 }
 
 function findEmbeddedPng(buffer) {
@@ -138,6 +149,127 @@ function findEmbeddedPng(buffer) {
   }
 
   return null;
+}
+
+function cadUnitFactor() {
+  return {
+    mm: 0.001,
+    cm: 0.01,
+    m: 1,
+    ft: 0.3048,
+    in: 0.0254
+  }[cadUnits.value] || 1;
+}
+
+function polygonArea(points) {
+  if (points.length < 3) return 0;
+  let sum = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    sum += (current.x * next.y) - (next.x * current.y);
+  }
+  return Math.abs(sum) / 2;
+}
+
+function parseDxfPolylines(text) {
+  const lines = text.replace(/\r/g, "").split("\n").map((line) => line.trim());
+  const shapes = [];
+
+  for (let index = 0; index < lines.length - 1; index += 2) {
+    const code = lines[index];
+    const value = lines[index + 1];
+
+    if (code === "0" && value === "LWPOLYLINE") {
+      const points = [];
+      let flags = 0;
+      let currentX = null;
+      index += 2;
+
+      while (index < lines.length - 1 && !(lines[index] === "0")) {
+        const group = lines[index];
+        const item = lines[index + 1];
+        if (group === "70") flags = Number(item) || 0;
+        if (group === "10") currentX = Number(item);
+        if (group === "20" && currentX !== null) {
+          points.push({ x: currentX, y: Number(item) });
+          currentX = null;
+        }
+        index += 2;
+      }
+
+      if ((flags & 1) === 1 && points.length >= 3) {
+        shapes.push({ points, rawArea: polygonArea(points) });
+      }
+      index -= 2;
+    }
+
+    if (code === "0" && value === "POLYLINE") {
+      const points = [];
+      let closed = false;
+      index += 2;
+
+      while (index < lines.length - 1 && !(lines[index] === "0" && lines[index + 1] === "SEQEND")) {
+        if (lines[index] === "70") closed = ((Number(lines[index + 1]) || 0) & 1) === 1;
+        if (lines[index] === "0" && lines[index + 1] === "VERTEX") {
+          let x = null;
+          let y = null;
+          index += 2;
+          while (index < lines.length - 1 && lines[index] !== "0") {
+            if (lines[index] === "10") x = Number(lines[index + 1]);
+            if (lines[index] === "20") y = Number(lines[index + 1]);
+            index += 2;
+          }
+          if (x !== null && y !== null) points.push({ x, y });
+          index -= 2;
+        }
+        index += 2;
+      }
+
+      if (closed && points.length >= 3) {
+        shapes.push({ points, rawArea: polygonArea(points) });
+      }
+    }
+  }
+
+  return shapes.filter((shape) => shape.rawArea > 0);
+}
+
+function showCadAnalysis({ status, message, shapes = [] }) {
+  const factor = cadUnitFactor();
+  const areas = shapes
+    .map((shape) => shape.rawArea * factor * factor)
+    .filter((area) => Number.isFinite(area) && area > 0)
+    .sort((a, b) => b - a);
+  const total = areas.reduce((sum, area) => sum + area, 0);
+  const largest = areas[0] || 0;
+
+  cadAnalysis.hidden = false;
+  cadStatus.textContent = status;
+  cadMessage.textContent = message;
+  cadShapeCount.textContent = `${areas.length}`;
+  cadLargestArea.textContent = `${largest.toFixed(2)} m²`;
+  cadTotalArea.textContent = `${total.toFixed(2)} m²`;
+  cadTotalFeet.textContent = `${(total * 10.7639).toFixed(2)} ft²`;
+}
+
+function analyseDxfText(text) {
+  lastDxfText = text;
+  const shapes = parseDxfPolylines(text);
+  if (!shapes.length) {
+    showCadAnalysis({
+      status: "DXF read, no closed room shapes found",
+      message: "Arqis could read the DXF file, but it did not find closed polylines yet. Closed room outlines are needed for automatic area calculation.",
+      shapes: []
+    });
+    return;
+  }
+
+  showCadAnalysis({
+    status: "DXF areas detected",
+    message: "Arqis found closed CAD shapes and calculated their areas using the selected drawing units. This is the first measurement pass and should be checked against the plan scale.",
+    shapes
+  });
 }
 
 async function showPlan(file) {
@@ -168,8 +300,23 @@ async function showPlan(file) {
       image.src = planObjectUrl;
       image.alt = "Embedded DWG drawing preview";
       planPreviewBody.append(image);
+      showCadAnalysis({
+        status: "DWG preview extracted",
+        message: "Arqis can show the embedded AutoCAD preview. To calculate areas from DWG files, the next backend stage will convert DWG to DXF and read the CAD geometry.",
+        shapes: []
+      });
       return;
     }
+  }
+
+  if (extension === "dxf") {
+    analyseDxfText(await file.text());
+  } else {
+    showCadAnalysis({
+      status: `${extension.toUpperCase()} measurement pending`,
+      message: "This file is uploaded as a plan reference. Automatic area extraction is currently being built first for DXF files.",
+      shapes: []
+    });
   }
 
   const card = document.createElement("div");
@@ -185,5 +332,8 @@ async function showPlan(file) {
 planFile.addEventListener("change", () => showPlan(planFile.files[0]));
 clearPlanBtn.addEventListener("click", clearPlan);
 enterAppBtn.addEventListener("click", enterApp);
+cadUnits.addEventListener("change", () => {
+  if (lastDxfText) analyseDxfText(lastDxfText);
+});
 
 calculate();
