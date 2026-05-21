@@ -50,12 +50,14 @@ function parseDxfPolylines(text) {
     if (code === "0" && value === "LWPOLYLINE") {
       const points = [];
       let flags = 0;
+      let layer = "";
       let currentX = null;
       index += 2;
 
       while (index < lines.length - 1 && lines[index] !== "0") {
         const group = lines[index];
         const item = lines[index + 1];
+        if (group === "8") layer = item;
         if (group === "70") flags = Number(item) || 0;
         if (group === "10") currentX = Number(item);
         if (group === "20" && currentX !== null) {
@@ -66,13 +68,24 @@ function parseDxfPolylines(text) {
       }
 
       if ((flags & 1) === 1 && points.length >= 3) {
-        shapes.push({ points, rawArea: polygonArea(points) });
+        shapes.push({ layer, points, rawArea: polygonArea(points) });
       }
       index -= 2;
     }
   }
 
   return shapes.filter((shape) => shape.rawArea > 0);
+}
+
+function roomLayerScore(layer = "") {
+  const name = layer.toLowerCase();
+  if (/(room|rooms|area|areas|floor|floors|boundary|boundaries|space|spaces|χωρ|δωμ)/.test(name)) return 2;
+  if (/(wall|walls|partition|outline)/.test(name)) return 1;
+  return 0;
+}
+
+function dwgRoomCandidates(shapes) {
+  return shapes.filter((shape) => roomLayerScore(shape.layer) >= 2);
 }
 
 function findEmbeddedPng(buffer) {
@@ -141,16 +154,18 @@ export default async function handler(req, res) {
     if (cleanExtension === "dwg") {
       const previewDataUrl = findEmbeddedPng(buffer);
       const convertedDxf = await convertDwgViaService({ fileName, base64 });
-      const shapes = convertedDxf ? parseDxfPolylines(convertedDxf) : [];
+      const convertedOutlines = convertedDxf ? parseDxfPolylines(convertedDxf) : [];
+      const shapes = dwgRoomCandidates(convertedOutlines);
 
       send(res, 200, {
         ok: true,
         fileType: "dwg",
-        status: shapes.length ? "DWG converted and outlines detected" : "DWG converted, no closed outlines found",
+        status: shapes.length ? "DWG room boundaries detected" : "DWG converted, room detection needed",
         message: shapes.length
-          ? "LibreDWG converted the DWG and Arqis found closed outlines to inspect in the room tabs."
-          : "LibreDWG converted the DWG, but Arqis did not find closed room outlines in the converted geometry yet.",
+          ? "LibreDWG converted the DWG and Arqis found likely room-boundary layers to inspect."
+          : `LibreDWG converted the DWG and found ${convertedOutlines.length} closed CAD outlines, but they are not marked as room boundaries. This plan needs wall-line room detection next.`,
         previewDataUrl,
+        closedOutlineCount: convertedOutlines.length,
         needsRoomDetection: !shapes.length,
         shapes
       });
