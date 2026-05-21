@@ -1,4 +1,5 @@
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_DWG_CONVERTER_URL = "https://arqis-converter.onrender.com/convert";
 
 function send(res, statusCode, payload) {
   res.statusCode = statusCode;
@@ -86,9 +87,8 @@ function findEmbeddedPng(buffer) {
 }
 
 async function convertDwgViaService({ fileName, base64 }) {
-  if (!process.env.DWG_CONVERTER_URL) return null;
-
-  const response = await fetch(process.env.DWG_CONVERTER_URL, {
+  const converterUrl = process.env.DWG_CONVERTER_URL || DEFAULT_DWG_CONVERTER_URL;
+  const response = await fetch(converterUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fileName, base64, output: "dxf" })
@@ -146,12 +146,12 @@ export default async function handler(req, res) {
       send(res, 200, {
         ok: true,
         fileType: "dwg",
-        status: shapes.length ? "DWG converted and rooms detected" : "DWG preview loaded",
+        status: shapes.length ? "DWG converted and outlines detected" : "DWG converted, no closed outlines found",
         message: shapes.length
-          ? "The backend converted the DWG and found closed room outlines."
-          : "The backend received the DWG and extracted its preview. Room extraction will run when a DWG converter service is connected.",
+          ? "LibreDWG converted the DWG and Arqis found closed outlines to inspect in the room tabs."
+          : "LibreDWG converted the DWG, but Arqis did not find closed room outlines in the converted geometry yet.",
         previewDataUrl,
-        needsConverter: !shapes.length,
+        needsRoomDetection: !shapes.length,
         shapes
       });
       return;
@@ -161,7 +161,7 @@ export default async function handler(req, res) {
       ok: true,
       fileType: cleanExtension || "unknown",
       status: `${(cleanExtension || "file").toUpperCase()} uploaded`,
-      message: "This file was received by the backend. Automatic room extraction currently supports DXF, with DWG converter support prepared.",
+      message: "This file was received by the backend. Automatic room extraction currently supports DXF and DWG conversion through LibreDWG.",
       shapes: []
     });
   } catch (error) {
