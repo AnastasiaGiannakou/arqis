@@ -6,6 +6,7 @@ const planPreviewBody = document.querySelector("#planPreviewBody");
 const fileStatus = document.querySelector("#fileStatus");
 const clearPlanBtn = document.querySelector("#clearPlanBtn");
 const enterAppBtn = document.querySelector("#enterAppBtn");
+const sampleDxfBtn = document.querySelector("#sampleDxfBtn");
 const cadAnalysis = document.querySelector("#cadAnalysis");
 const cadStatus = document.querySelector("#cadStatus");
 const cadMessage = document.querySelector("#cadMessage");
@@ -128,7 +129,11 @@ function clearPlan() {
   planPreviewBody.replaceChildren();
   fileStatus.textContent = "No plan uploaded yet";
   lastDxfText = "";
-  cadAnalysis.hidden = true;
+  showCadAnalysis({
+    status: "Upload a CAD file to begin",
+    message: "Arqis will preview uploaded plans and calculate areas from DXF files that contain closed room outlines.",
+    shapes: []
+  });
 }
 
 function findEmbeddedPng(buffer) {
@@ -272,6 +277,56 @@ function analyseDxfText(text) {
   });
 }
 
+function sampleDxf() {
+  return `0
+SECTION
+2
+ENTITIES
+0
+LWPOLYLINE
+90
+4
+70
+1
+10
+0
+20
+0
+10
+3200
+20
+0
+10
+3200
+20
+2400
+10
+0
+20
+2400
+0
+ENDSEC
+0
+EOF`;
+}
+
+function loadSampleDxf() {
+  clearPlan();
+  fileStatus.textContent = "Sample DXF room loaded (3.2m x 2.4m)";
+  cadUnits.value = "mm";
+  analyseDxfText(sampleDxf());
+  planPreview.hidden = false;
+  planPreviewBody.replaceChildren();
+  const card = document.createElement("div");
+  card.className = "plan-file-card";
+  card.innerHTML = `
+    <strong>Sample DXF room</strong>
+    <span>Closed CAD polyline: 3.2m by 2.4m.</span>
+    <span>Arqis has calculated this from CAD geometry.</span>
+  `;
+  planPreviewBody.append(card);
+}
+
 async function showPlan(file) {
   if (!file) return;
   if (planObjectUrl) URL.revokeObjectURL(planObjectUrl);
@@ -288,6 +343,11 @@ async function showPlan(file) {
     image.src = planObjectUrl;
     image.alt = "Uploaded architectural plan preview";
     planPreviewBody.append(image);
+    showCadAnalysis({
+      status: "Plan image previewed",
+      message: "This image can be used as a visual reference. The next image/PDF stage will let you trace room outlines so Arqis can calculate areas from the traced shape.",
+      shapes: []
+    });
     return;
   }
 
@@ -307,6 +367,11 @@ async function showPlan(file) {
       });
       return;
     }
+    showCadAnalysis({
+      status: "DWG uploaded",
+      message: "Arqis received the AutoCAD file, but this DWG does not expose a usable embedded preview in the browser. Automatic DWG area calculation needs the backend conversion stage from DWG to DXF.",
+      shapes: []
+    });
   }
 
   if (extension === "dxf") {
@@ -332,6 +397,7 @@ async function showPlan(file) {
 planFile.addEventListener("change", () => showPlan(planFile.files[0]));
 clearPlanBtn.addEventListener("click", clearPlan);
 enterAppBtn.addEventListener("click", enterApp);
+sampleDxfBtn.addEventListener("click", loadSampleDxf);
 cadUnits.addEventListener("change", () => {
   if (lastDxfText) analyseDxfText(lastDxfText);
 });
