@@ -33,6 +33,16 @@
               <small>PDF, image, DXF, or DWG</small>
               <input id="planFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.dxf,.dwg">
             </label>
+            <label>
+              CAD drawing units
+              <select id="cadUnits">
+                <option value="mm" selected>Millimetres</option>
+                <option value="m">Metres</option>
+                <option value="cm">Centimetres</option>
+                <option value="ft">Feet</option>
+                <option value="in">Inches</option>
+              </select>
+            </label>
             <p class="file-status" id="fileStatus">No plan uploaded yet</p>
           </fieldset>
 
@@ -158,6 +168,32 @@
             <div class="toilet"></div>
           </div>
         </div>
+
+        <section class="cad-analysis" id="cadAnalysis" hidden>
+          <div>
+            <p class="eyebrow">CAD analysis</p>
+            <h3 id="cadStatus">No CAD file analysed</h3>
+            <p id="cadMessage"></p>
+          </div>
+          <div class="cad-metrics">
+            <article>
+              <span>Closed shapes</span>
+              <strong id="cadShapeCount">0</strong>
+            </article>
+            <article>
+              <span>Largest area</span>
+              <strong id="cadLargestArea">0 m²</strong>
+            </article>
+            <article>
+              <span>Total area</span>
+              <strong id="cadTotalArea">0 m²</strong>
+            </article>
+            <article>
+              <span>Total area</span>
+              <strong id="cadTotalFeet">0 ft²</strong>
+            </article>
+          </div>
+        </section>
 
         <div class="results" aria-live="polite">
           <article>
