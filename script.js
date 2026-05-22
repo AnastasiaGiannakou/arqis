@@ -373,6 +373,16 @@ function renderPlanCard(file, message) {
   planPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>${message}</span></div>`;
 }
 
+function renderPendingPlan(file) {
+  planPreviewBody.innerHTML = `
+    <div class="plan-file-card">
+      <strong>${file.name}</strong>
+      <span>Upload received. Arqis is analysing the CAD file now.</span>
+      <span>DWG conversion can take a little longer while the converter wakes up.</span>
+    </div>
+  `;
+}
+
 async function showPlan(file) {
   if (!file) return;
   if (planObjectUrl) URL.revokeObjectURL(planObjectUrl);
@@ -392,6 +402,7 @@ async function showPlan(file) {
   }
 
   fileStatus.textContent = `Analysing ${file.name} on the backend...`;
+  renderPendingPlan(file);
   showCadAnalysis({ status: "Backend analysis running", message: "Arqis is sending the CAD file to the server so conversion and room extraction can happen outside the browser.", shapes: [] });
 
   try {
@@ -402,7 +413,7 @@ async function showPlan(file) {
       const image = document.createElement("img");
       image.src = result.previewDataUrl;
       image.alt = "Embedded DWG drawing preview";
-      planPreviewBody.append(image);
+      planPreviewBody.replaceChildren(image);
     } else {
       const message = extension === "dxf"
         ? "DXF uploaded to the backend and checked for closed room outlines."
@@ -438,6 +449,9 @@ fields.forEach((field) => {
 });
 
 document.querySelector("#printBtn").addEventListener("click", () => window.print());
+planFile.addEventListener("click", () => {
+  planFile.value = "";
+});
 planFile.addEventListener("change", () => showPlan(planFile.files[0]));
 clearPlanBtn.addEventListener("click", clearPlan);
 enterAppBtn.addEventListener("click", enterApp);
