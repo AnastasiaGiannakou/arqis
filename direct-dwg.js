@@ -1,8 +1,10 @@
 const directDwgFile = document.querySelector("#planFile");
 const directDwgFileStatus = document.querySelector("#fileStatus");
 const directDwgPreviewBody = document.querySelector("#planPreviewBody");
+const directDwgRoomTabs = document.querySelector("#roomTabs");
 const VERCEL_DWG_FILE_LIMIT = 3 * 1024 * 1024;
 const DIRECT_CONVERTER_URL = "https://arqis-converter.onrender.com/convert";
+let directFloorBrowser = null;
 
 function directDwgExtension(file) {
   return file.name.split(".").pop().toLowerCase();
@@ -17,9 +19,117 @@ function directDwgCard(file, lines) {
   `;
 }
 
+function directShapeBounds(shape) {
+  const xs = shape.points.map((point) => point.x);
+  const ys = shape.points.map((point) => point.y);
+  return {
+    minX: Math.min(...xs),
+    maxX: Math.max(...xs),
+    minY: Math.min(...ys),
+    maxY: Math.max(...ys),
+    width: Math.max(...xs) - Math.min(...xs),
+    height: Math.max(...ys) - Math.min(...ys)
+  };
+}
+
+function directBoundsGap(left, right) {
+  const xGap = Math.max(0, left.minX - right.maxX, right.minX - left.maxX);
+  const yGap = Math.max(0, left.minY - right.maxY, right.minY - left.maxY);
+  return Math.hypot(xGap, yGap);
+}
+
+function directMergeBounds(left, right) {
+  return {
+    minX: Math.min(left.minX, right.minX),
+    maxX: Math.max(left.maxX, right.maxX),
+    minY: Math.min(left.minY, right.minY),
+    maxY: Math.max(left.maxY, right.maxY)
+  };
+}
+
+function directPercentile(values, ratio) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor((sorted.length - 1) * ratio)];
+}
+
+function directFloorCandidates(shapes) {
+  if (!shapes.length) return [];
+  const measured = shapes.map((shape) => ({ shape, bounds: directShapeBounds(shape) }));
+  const floorGap = Math.max(
+    directPercentile(measured.map(({ bounds }) => Math.max(bounds.width, bounds.height)), 0.5) * 1.8,
+    1e-6
+  );
+  const groups = measured.map(({ shape, bounds }) => ({ shapes: [shape], bounds }));
+
+  for (let leftIndex = 0; leftIndex < groups.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < groups.length;) {
+      if (directBoundsGap(groups[leftIndex].bounds, groups[rightIndex].bounds) > floorGap) {
+        rightIndex += 1;
+        continue;
+      }
+      groups[leftIndex].shapes.push(...groups[rightIndex].shapes);
+      groups[leftIndex].bounds = directMergeBounds(groups[leftIndex].bounds, groups[rightIndex].bounds);
+      groups.splice(rightIndex, 1);
+    }
+  }
+
+  return groups
+    .sort((left, right) => right.bounds.maxY - left.bounds.maxY || left.bounds.minX - right.bounds.minX)
+    .map((group, index) => ({
+      name: groups.length === 1 ? "Plan floor" : `Floor candidate ${index + 1}`,
+      shapes: group.shapes
+    }));
+}
+
+function directRemoveFloors() {
+  directFloorBrowser?.remove();
+  directFloorBrowser = null;
+}
+
+function directRenderFloors(status, message, floors) {
+  directRemoveFloors();
+  if (floors.length < 2 || !directDwgRoomTabs) return false;
+
+  directFloorBrowser = document.createElement("div");
+  directFloorBrowser.className = "room-tabs";
+  directFloorBrowser.setAttribute("role", "tablist");
+  directFloorBrowser.setAttribute("aria-label", "Detected floor candidates");
+  directDwgRoomTabs.before(directFloorBrowser);
+
+  floors.forEach((floor, index) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = `room-tab${index === 0 ? " active" : ""}`;
+    tab.textContent = floor.name;
+    tab.addEventListener("click", () => {
+      directFloorBrowser.querySelectorAll(".room-tab").forEach((button, buttonIndex) => {
+        button.classList.toggle("active", buttonIndex === index);
+      });
+      showCadAnalysis({
+        status: `${status} - ${floor.name}`,
+        message: `${message} Choose a floor candidate first, then check its room tabs.`,
+        shapes: floor.shapes
+      });
+    });
+    directFloorBrowser.append(tab);
+  });
+
+  showCadAnalysis({
+    status: `${status} - ${floors[0].name}`,
+    message: `${message} Choose a floor candidate first, then check its room tabs.`,
+    shapes: floors[0].shapes
+  });
+  return true;
+}
+
 function directDwgAnalysis(status, message, shapes = [], floors = []) {
   if (typeof showCadAnalysis === "function") {
-    showCadAnalysis({ status, message, shapes, floors });
+    const floorCandidates = floors.length ? floors : directFloorCandidates(shapes);
+    if (!directRenderFloors(status, message, floorCandidates)) {
+      directRemoveFloors();
+      showCadAnalysis({ status, message, shapes, floors });
+    }
   }
 }
 
