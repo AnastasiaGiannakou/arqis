@@ -77,7 +77,7 @@ function directFloorCandidates(shapes) {
   return groups
     .sort((left, right) => right.bounds.maxY - left.bounds.maxY || left.bounds.minX - right.bounds.minX)
     .map((group, index) => ({
-      name: groups.length === 1 ? "Plan floor" : `Floor candidate ${index + 1}`,
+      name: groups.length === 1 ? "Plan floor" : `Floor ${index + 1}`,
       shapes: group.shapes
     }));
 }
@@ -94,7 +94,7 @@ function directRenderFloors(status, message, floors) {
   directFloorBrowser = document.createElement("div");
   directFloorBrowser.className = "room-tabs";
   directFloorBrowser.setAttribute("role", "tablist");
-  directFloorBrowser.setAttribute("aria-label", "Detected floor candidates");
+  directFloorBrowser.setAttribute("aria-label", "Detected floors");
   directDwgRoomTabs.before(directFloorBrowser);
 
   floors.forEach((floor, index) => {
@@ -108,7 +108,7 @@ function directRenderFloors(status, message, floors) {
       });
       showCadAnalysis({
         status: `${status} - ${floor.name}`,
-        message: `${message} Choose a floor candidate first, then check its room tabs.`,
+        message: `${message} Choose a floor first, then check its room tabs.`,
         shapes: floor.shapes
       });
     });
@@ -117,7 +117,7 @@ function directRenderFloors(status, message, floors) {
 
   showCadAnalysis({
     status: `${status} - ${floors[0].name}`,
-    message: `${message} Choose a floor candidate first, then check its room tabs.`,
+    message: `${message} Choose a floor first, then check its room tabs.`,
     shapes: floors[0].shapes
   });
   return true;
@@ -203,7 +203,7 @@ async function convertLargeDwg(file) {
   directDwgFileStatus.textContent = `${file.name} converted and checked`;
   directDwgCard(file, [
     "Large DWG converted outside Vercel.",
-    "Arqis is checking the extracted CAD geometry for floor and room candidates."
+    "Arqis is checking the extracted CAD geometry for floors and rooms."
   ]);
   directDwgAnalysis(
     analysis.status || "Converted CAD geometry checked",
