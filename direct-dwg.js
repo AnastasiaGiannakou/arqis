@@ -5,6 +5,7 @@ const directDwgRoomTabs = document.querySelector("#roomTabs");
 const VERCEL_DWG_FILE_LIMIT = 3 * 1024 * 1024;
 const DIRECT_CONVERTER_URL = "https://arqis-converter.onrender.com/convert";
 let directFloorBrowser = null;
+let directActiveFloor = null;
 
 function directDwgExtension(file) {
   return file.name.split(".").pop().toLowerCase();
@@ -82,9 +83,65 @@ function directFloorCandidates(shapes) {
     }));
 }
 
+function directSvgPoint(point, bounds) {
+  const width = 360;
+  const height = 460;
+  const padding = 22;
+  const spanX = Math.max(bounds.maxX - bounds.minX, 1e-6);
+  const spanY = Math.max(bounds.maxY - bounds.minY, 1e-6);
+  const scale = Math.min((width - padding * 2) / spanX, (height - padding * 2) / spanY);
+  const offsetX = (width - spanX * scale) / 2;
+  const offsetY = (height - spanY * scale) / 2;
+  return {
+    x: offsetX + (point.x - bounds.minX) * scale,
+    y: height - (offsetY + (point.y - bounds.minY) * scale)
+  };
+}
+
+function directFloorBounds(shapes) {
+  return shapes.map(directShapeBounds).reduce((bounds, next) => directMergeBounds(bounds, next));
+}
+
+function directFloorOverview(floor, roomIndex = 0) {
+  if (!floor?.shapes?.length) return;
+  directActiveFloor = floor;
+  const bounds = directFloorBounds(floor.shapes);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("floor-plan-preview");
+  svg.setAttribute("viewBox", "0 0 360 460");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${floor.name} overview`);
+  svg.style.cssText = "width:100%;height:min(460px,54vh);border:1px solid #d7ded8;border-radius:6px;background:#f9fbf7";
+
+  floor.shapes.forEach((shape, index) => {
+    const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    polygon.setAttribute("points", shape.points.map((point) => {
+      const next = directSvgPoint(point, bounds);
+      return `${next.x.toFixed(1)},${next.y.toFixed(1)}`;
+    }).join(" "));
+    polygon.classList.toggle("active", index === roomIndex);
+    polygon.setAttribute("fill", index === roomIndex ? "rgba(29,107,79,0.34)" : "rgba(24,32,29,0.06)");
+    polygon.setAttribute("stroke", index === roomIndex ? "#164c3a" : "#65736c");
+    polygon.setAttribute("stroke-width", index === roomIndex ? "4" : "2");
+    svg.append(polygon);
+  });
+
+  const caption = document.createElement("p");
+  caption.className = "floor-plan-caption";
+  caption.style.cssText = "color:#65736c;font-size:12px;font-weight:800;text-transform:uppercase";
+  caption.textContent = `${floor.name} overview`;
+  directDwgPreviewBody.replaceChildren(svg, caption);
+}
+
+function directHighlightRoom(roomIndex) {
+  if (!directActiveFloor) return;
+  directFloorOverview(directActiveFloor, roomIndex);
+}
+
 function directRemoveFloors() {
   directFloorBrowser?.remove();
   directFloorBrowser = null;
+  directActiveFloor = null;
 }
 
 function directRenderFloors(status, message, floors) {
@@ -111,6 +168,7 @@ function directRenderFloors(status, message, floors) {
         message: `${message} Choose a floor first, then check its room tabs.`,
         shapes: floor.shapes
       });
+      directFloorOverview(floor);
     });
     directFloorBrowser.append(tab);
   });
@@ -120,6 +178,7 @@ function directRenderFloors(status, message, floors) {
     message: `${message} Choose a floor first, then check its room tabs.`,
     shapes: floors[0].shapes
   });
+  directFloorOverview(floors[0]);
   return true;
 }
 
@@ -235,3 +294,10 @@ async function onLargeDwgChange(event) {
 }
 
 directDwgFile.addEventListener("change", onLargeDwgChange, { capture: true });
+directDwgRoomTabs?.addEventListener("click", (event) => {
+  const roomTab = event.target.closest(".room-tab");
+  if (!roomTab || !directActiveFloor) return;
+  const tabs = [...directDwgRoomTabs.querySelectorAll(".room-tab")];
+  const roomIndex = tabs.indexOf(roomTab);
+  if (roomIndex >= 0) directHighlightRoom(roomIndex);
+});
