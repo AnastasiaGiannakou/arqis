@@ -23,15 +23,6 @@ function directDwgAnalysis(status, message, shapes = []) {
   }
 }
 
-function directDwgBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
-    reader.onerror = () => reject(new Error("The DWG file could not be read."));
-    reader.readAsDataURL(file);
-  });
-}
-
 function directTextBase64(text) {
   const bytes = new TextEncoder().encode(text);
   let binary = "";
@@ -52,7 +43,7 @@ async function directJson(response, fallback) {
 
 function directDwgErrorMessage(error) {
   if (!error?.message || error.message === "Failed to fetch") {
-    return "The converter could not complete this large DWG yet. Export one floor as DXF or DWG for the next reliable extraction pass.";
+    return "The converter could not complete this large DWG yet. Arqis is still working on the large drawing conversion route.";
   }
   return error.message;
 }
@@ -68,14 +59,10 @@ async function convertLargeDwg(file) {
     "This CAD file is too large for the small Vercel analysis upload. Arqis is sending it directly to the DWG converter first."
   );
 
-  const conversionResponse = await fetch(DIRECT_CONVERTER_URL, {
+  const conversionResponse = await fetch(`${DIRECT_CONVERTER_URL}?fileName=${encodeURIComponent(file.name)}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      fileName: file.name,
-      base64: await directDwgBase64(file),
-      output: "dxf"
-    })
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file
   });
   const conversion = await directJson(
     conversionResponse,
@@ -124,10 +111,10 @@ async function onLargeDwgChange(event) {
   try {
     await convertLargeDwg(file);
   } catch (error) {
-    directDwgFileStatus.textContent = `${file.name} needs a different CAD route`;
+    directDwgFileStatus.textContent = `${file.name} is still converting differently`;
     directDwgCard(file, [
-      "The large DWG did not complete through the converter.",
-      "For the next reliable extraction pass, export one floor as DXF or DWG from AutoCAD."
+      "The large DWG did not complete through the current converter pass.",
+      "Arqis will keep the upload route for large CAD files separate from the small-file analyser."
     ]);
     directDwgAnalysis(
       "Large DWG conversion not complete",
