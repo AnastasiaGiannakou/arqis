@@ -321,10 +321,254 @@ function geometryBoundsArea(segments) {
   return width * height;
 }
 
+function segmentBounds(segment) {
+  return {
+    minX: Math.min(segment.a.x, segment.b.x),
+    maxX: Math.max(segment.a.x, segment.b.x),
+    minY: Math.min(segment.a.y, segment.b.y),
+    maxY: Math.max(segment.a.y, segment.b.y)
+  };
+}
+
+function boundsGap(left, right) {
+  const xGap = Math.max(0, left.minX - right.maxX, right.minX - left.maxX);
+  const yGap = Math.max(0, left.minY - right.maxY, right.minY - left.maxY);
+  return Math.hypot(xGap, yGap);
+}
+
+function mergeBounds(left, right) {
+  return {
+    minX: Math.min(left.minX, right.minX),
+    maxX: Math.max(left.maxX, right.maxX),
+    minY: Math.min(left.minY, right.minY),
+    maxY: Math.max(left.maxY, right.maxY)
+  };
+}
+
 function percentile(values, ratio) {
   if (!values.length) return 0;
   const sorted = [...values].sort((left, right) => left - right);
   return sorted[Math.floor((sorted.length - 1) * ratio)];
+}
+
+function groupWallSegments(segments) {
+  const wallScale = percentile(segments.map(segmentLength), 0.95);
+  const groupGap = Math.max(wallScale * 0.55, 1e-6);
+  const groups = segments.map((segment) => ({ segments: [segment], bounds: segmentBounds(segment) }));
+
+  for (let leftIndex = 0; leftIndex < groups.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < groups.length;) {
+      if (boundsGap(groups[leftIndex].bounds, groups[rightIndex].bounds) > groupGap) {
+        rightIndex += 1;
+        continue;
+      }
+      groups[leftIndex].segments.push(...groups[rightIndex].segments);
+      groups[leftIndex].bounds = mergeBounds(groups[leftIndex].bounds, groups[rightIndex].bounds);
+      groups.splice(rightIndex, 1);
+      rightIndex = leftIndex + 1;
+    }
+  }
+
+  return groups
+    .filter((group) => group.segments.length >= 12)
+    .sort((left, right) => right.segments.length - left.segments.length)
+    .slice(0, 8);
+}
+
+function rasteriseSegments(segments, bounds, cellSize, radius) {
+  const padding = cellSize * 5;
+  const minX = bounds.minX - padding;
+  const minY = bounds.minY - padding;
+  const width = Math.ceil((bounds.maxX - bounds.minX + padding * 2) / cellSize) + 1;
+  const height = Math.ceil((bounds.maxY - bounds.minY + padding * 2) / cellSize) + 1;
+  if (width < 8 || height < 8 || width * height > 120000) return null;
+
+  const cells = new Uint8Array(width * height);
+  const index = (x, y) => y * width + x;
+  const gridPoint = (point) => ({
+    x: Math.round((point.x - minX) / cellSize),
+    y: Math.round((point.y - minY) / cellSize)
+  });
+  const mark = (x, y) => {
+    for (let deltaY = -radius; deltaY <= radius; deltaY += 1) {
+      for (let deltaX = -radius; deltaX <= radius; deltaX += 1) {
+        if (deltaX * deltaX + deltaY * deltaY > radius * radius + 1) continue;
+        const nextX = x + deltaX;
+        const nextY = y + deltaY;
+        if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) continue;
+        cells[index(nextX, nextY)] = 1;
+      }
+    }
+  };
+
+  segments.forEach((segment) => {
+    const start = gridPoint(segment.a);
+    const end = gridPoint(segment.b);
+    const steps = Math.max(Math.abs(end.x - start.x), Math.abs(end.y - start.y), 1);
+    for (let step = 0; step <= steps; step += 1) {
+      mark(
+        Math.round(start.x + (end.x - start.x) * step / steps),
+        Math.round(start.y + (end.y - start.y) * step / steps)
+      );
+    }
+  });
+
+  return { cells, width, height, cellSize, minX, minY, index };
+}
+
+function enclosedGridComponents(grid, minimumCells) {
+  const seen = new Uint8Array(grid.width * grid.height);
+  const components = [];
+  const offsets = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+  for (let y = 0; y < grid.height; y += 1) {
+    for (let x = 0; x < grid.width; x += 1) {
+      const start = grid.index(x, y);
+      if (grid.cells[start] || seen[start]) continue;
+      const stack = [start];
+      const cells = [];
+      let touchesBorder = false;
+      seen[start] = 1;
+      while (stack.length) {
+        const current = stack.pop();
+        const currentX = current % grid.width;
+        const currentY = Math.floor(current / grid.width);
+        cells.push(current);
+        if (currentX === 0 || currentY === 0 || currentX === grid.width - 1 || currentY === grid.height - 1) {
+          touchesBorder = true;
+        }
+        offsets.forEach(([deltaX, deltaY]) => {
+          const nextX = currentX + deltaX;
+          const nextY = currentY + deltaY;
+          if (nextX < 0 || nextY < 0 || nextX >= grid.width || nextY >= grid.height) return;
+          const next = grid.index(nextX, nextY);
+          if (grid.cells[next] || seen[next]) return;
+          seen[next] = 1;
+          stack.push(next);
+        });
+      }
+      if (!touchesBorder && cells.length >= minimumCells) components.push(cells);
+    }
+  }
+
+  return components.sort((left, right) => right.length - left.length);
+}
+
+function growGridRooms(grid, seeds) {
+  const labels = new Int32Array(grid.width * grid.height);
+  const queue = [];
+  seeds.forEach((cells, seedIndex) => {
+    const label = seedIndex + 1;
+    cells.forEach((cell) => {
+      labels[cell] = label;
+      queue.push(cell);
+    });
+  });
+
+  const offsets = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
+    const current = queue[queueIndex];
+    const currentX = current % grid.width;
+    const currentY = Math.floor(current / grid.width);
+    offsets.forEach(([deltaX, deltaY]) => {
+      const nextX = currentX + deltaX;
+      const nextY = currentY + deltaY;
+      if (nextX < 0 || nextY < 0 || nextX >= grid.width || nextY >= grid.height) return;
+      const next = grid.index(nextX, nextY);
+      if (grid.cells[next] || labels[next]) return;
+      labels[next] = labels[current];
+      queue.push(next);
+    });
+  }
+
+  return seeds.map((_, seedIndex) => {
+    const label = seedIndex + 1;
+    const cells = [];
+    labels.forEach((value, cell) => {
+      if (value === label) cells.push(cell);
+    });
+    return cells;
+  });
+}
+
+function simplifyGridRing(points) {
+  return points.filter((point, index) => {
+    const previous = points[(index - 1 + points.length) % points.length];
+    const next = points[(index + 1) % points.length];
+    return !((previous.x === point.x && point.x === next.x) || (previous.y === point.y && point.y === next.y));
+  });
+}
+
+function cellsToShape(grid, cells) {
+  const cellSet = new Set(cells);
+  const edgeMap = new Map();
+  const addEdge = (start, end) => {
+    const key = `${start.x},${start.y}`;
+    if (!edgeMap.has(key)) edgeMap.set(key, []);
+    edgeMap.get(key).push(end);
+  };
+
+  cells.forEach((cell) => {
+    const x = cell % grid.width;
+    const y = Math.floor(cell / grid.width);
+    if (!cellSet.has(grid.index(x, Math.max(0, y - 1)))) addEdge({ x, y }, { x: x + 1, y });
+    if (x === grid.width - 1 || !cellSet.has(grid.index(x + 1, y))) addEdge({ x: x + 1, y }, { x: x + 1, y: y + 1 });
+    if (y === grid.height - 1 || !cellSet.has(grid.index(x, y + 1))) addEdge({ x: x + 1, y: y + 1 }, { x, y: y + 1 });
+    if (!cellSet.has(grid.index(Math.max(0, x - 1), y))) addEdge({ x, y: y + 1 }, { x, y });
+  });
+
+  let longest = [];
+  edgeMap.forEach((destinations, key) => {
+    if (!destinations.length) return;
+    const [startX, startY] = key.split(",").map(Number);
+    const ring = [{ x: startX, y: startY }];
+    let currentKey = key;
+    for (let guard = 0; guard < cells.length * 5; guard += 1) {
+      const next = edgeMap.get(currentKey)?.shift();
+      if (!next) break;
+      ring.push(next);
+      currentKey = `${next.x},${next.y}`;
+      if (currentKey === key) break;
+    }
+    if (ring.length > longest.length) longest = ring;
+  });
+
+  const points = simplifyGridRing(longest.slice(0, -1)).map((point) => ({
+    x: grid.minX + point.x * grid.cellSize,
+    y: grid.minY + point.y * grid.cellSize
+  }));
+  return {
+    points,
+    rawArea: cells.length * grid.cellSize * grid.cellSize,
+    source: "floor-space-grid"
+  };
+}
+
+function cellsTouchGridBorder(grid, cells) {
+  return cells.some((cell) => {
+    const x = cell % grid.width;
+    const y = Math.floor(cell / grid.width);
+    return x === 0 || y === 0 || x === grid.width - 1 || y === grid.height - 1;
+  });
+}
+
+function detectGridFloorSpaces(wallSegments) {
+  const groups = groupWallSegments(wallSegments);
+  return groups.flatMap((group) => {
+    const wallScale = percentile(group.segments.map(segmentLength), 0.95);
+    const cellSize = Math.max(wallScale / 48, 1e-6);
+    const closedGrid = rasteriseSegments(group.segments, group.bounds, cellSize, 6);
+    const openGrid = rasteriseSegments(group.segments, group.bounds, cellSize, 1);
+    if (!closedGrid || !openGrid) return [];
+    const seeds = enclosedGridComponents(closedGrid, 16).slice(0, 14);
+    if (seeds.length < 2) return [];
+    return growGridRooms(openGrid, seeds)
+      .filter((cells) => !cellsTouchGridBorder(openGrid, cells))
+      .map((cells) => cellsToShape(openGrid, cells))
+      .filter((shape) => shape.points.length >= 3
+        && shape.rawArea > cellSize * cellSize * 24
+        && shape.rawArea < (group.bounds.maxX - group.bounds.minX) * (group.bounds.maxY - group.bounds.minY) * 0.45);
+  });
 }
 
 function dedupeRoomFaces(shapes) {
@@ -379,6 +623,12 @@ function likelyRoomFaces(segments) {
 function detectWallLineRooms(dxfText) {
   const geometry = parseDxfGeometry(dxfText);
   const wallSegments = geometrySegments(geometry, true);
+  const floorSpaces = detectGridFloorSpaces(wallSegments);
+  if (floorSpaces.length) {
+    return dedupeRoomFaces(floorSpaces)
+      .sort((left, right) => right.rawArea - left.rawArea)
+      .slice(0, 18);
+  }
   const wallFaces = likelyRoomFaces(wallSegments);
   if (wallFaces.length) return wallFaces;
   return likelyRoomFaces(geometrySegments(geometry, false));
