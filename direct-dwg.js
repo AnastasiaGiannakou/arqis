@@ -6,6 +6,7 @@ const VERCEL_DWG_FILE_LIMIT = 3 * 1024 * 1024;
 const DIRECT_CONVERTER_URL = "https://arqis-converter.onrender.com/convert";
 let directFloorBrowser = null;
 let directActiveFloor = null;
+let directCadEntities = [];
 
 function directDwgExtension(file) {
   return file.name.split(".").pop().toLowerCase();
@@ -98,20 +99,115 @@ function directSvgPoint(point, bounds) {
   };
 }
 
+function directDxfPairs(text) {
+  const lines = text.replace(/\r/g, "").split("\n").map((line) => line.trim());
+  const pairs = [];
+  for (let index = 0; index < lines.length - 1; index += 2) {
+    pairs.push([lines[index], lines[index + 1]]);
+  }
+  return pairs;
+}
+
+function directCadGeometry(text) {
+  const pairs = directDxfPairs(text);
+  const entities = [];
+
+  for (let index = 0; index < pairs.length;) {
+    if (pairs[index][0] !== "0" || !["LINE", "LWPOLYLINE"].includes(pairs[index][1])) {
+      index += 1;
+      continue;
+    }
+
+    const type = pairs[index][1];
+    const points = [];
+    let currentX = null;
+    index += 1;
+    while (index < pairs.length && pairs[index][0] !== "0") {
+      const [code, value] = pairs[index];
+      if (code === "10" || code === "11") currentX = Number(value);
+      if ((code === "20" || code === "21") && currentX !== null) {
+        points.push({ x: currentX, y: Number(value) });
+        currentX = null;
+      }
+      index += 1;
+    }
+
+    if (points.length >= 2 && points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))) {
+      entities.push({ type, points, bounds: directShapeBounds({ points }) });
+    }
+  }
+
+  return entities;
+}
+
 function directFloorBounds(shapes) {
   return shapes.map(directShapeBounds).reduce((bounds, next) => directMergeBounds(bounds, next));
+}
+
+function directExpandBounds(bounds, ratio = 0.9) {
+  const width = bounds.maxX - bounds.minX;
+  const height = bounds.maxY - bounds.minY;
+  const padding = Math.max(width, height, 1) * ratio;
+  return {
+    minX: bounds.minX - padding,
+    maxX: bounds.maxX + padding,
+    minY: bounds.minY - padding,
+    maxY: bounds.maxY + padding,
+    width: width + padding * 2,
+    height: height + padding * 2
+  };
+}
+
+function directBoundsOverlap(left, right) {
+  return left.minX <= right.maxX
+    && left.maxX >= right.minX
+    && left.minY <= right.maxY
+    && left.maxY >= right.minY;
+}
+
+function directPlanEntities(floorBounds) {
+  const crop = directExpandBounds(floorBounds);
+  return directCadEntities
+    .filter((entity) => directBoundsOverlap(crop, entity.bounds))
+    .slice(0, 2600);
+}
+
+function directLineworkBounds(entities, fallback) {
+  if (!entities.length) return fallback;
+  return entities.map((entity) => entity.bounds).reduce((bounds, next) => directMergeBounds(bounds, next), fallback);
 }
 
 function directFloorOverview(floor, roomIndex = 0) {
   if (!floor?.shapes?.length) return;
   directActiveFloor = floor;
-  const bounds = directFloorBounds(floor.shapes);
+  const floorBounds = directFloorBounds(floor.shapes);
+  const planEntities = directPlanEntities(floorBounds);
+  const bounds = directLineworkBounds(planEntities, floorBounds);
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.classList.add("floor-plan-preview");
   svg.setAttribute("viewBox", "0 0 360 460");
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", `${floor.name} overview`);
   svg.style.cssText = "width:100%;height:min(460px,54vh);border:1px solid #d7ded8;border-radius:6px;background:#f9fbf7";
+
+  planEntities.forEach((entity) => {
+    const linework = document.createElementNS("http://www.w3.org/2000/svg", entity.type === "LINE" ? "line" : "polyline");
+    const points = entity.points.map((point) => directSvgPoint(point, bounds));
+    if (entity.type === "LINE") {
+      linework.setAttribute("x1", points[0].x.toFixed(1));
+      linework.setAttribute("y1", points[0].y.toFixed(1));
+      linework.setAttribute("x2", points[1].x.toFixed(1));
+      linework.setAttribute("y2", points[1].y.toFixed(1));
+    } else {
+      linework.setAttribute("points", points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
+    }
+    linework.setAttribute("fill", "none");
+    linework.setAttribute("stroke", "#46544e");
+    linework.setAttribute("stroke-width", entity.type === "LINE" ? "1.2" : "1.6");
+    linework.setAttribute("stroke-linecap", "round");
+    linework.setAttribute("stroke-linejoin", "round");
+    svg.append(linework);
+  });
 
   floor.shapes.forEach((shape, index) => {
     const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
@@ -129,7 +225,7 @@ function directFloorOverview(floor, roomIndex = 0) {
   const caption = document.createElement("p");
   caption.className = "floor-plan-caption";
   caption.style.cssText = "color:#65736c;font-size:12px;font-weight:800;text-transform:uppercase";
-  caption.textContent = `${floor.name} overview`;
+  caption.textContent = `${floor.name} generated plan`;
   directDwgPreviewBody.replaceChildren(svg, caption);
 }
 
@@ -218,6 +314,7 @@ function directDwgErrorMessage(error) {
 }
 
 async function convertLargeDwg(file) {
+  directCadEntities = [];
   directDwgFileStatus.textContent = `Sending ${file.name} to the DWG converter...`;
   directDwgCard(file, [
     "Large DWG received.",
@@ -240,6 +337,7 @@ async function convertLargeDwg(file) {
   if (!conversionResponse.ok || !conversion.ok || !conversion.dxfText) {
     throw new Error(conversion.message || "The DWG converter could not process this drawing yet.");
   }
+  directCadEntities = directCadGeometry(conversion.dxfText);
 
   directDwgFileStatus.textContent = `Checking converted geometry from ${file.name}...`;
   const analysisResponse = await fetch("/api/analyse-plan", {
