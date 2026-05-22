@@ -353,13 +353,16 @@ function likelyRoomFaces(segments) {
   if (!footprintArea) return [];
   const longWallScale = percentile(segments.map(segmentLength), 0.95);
   const roomScaleArea = longWallScale ? longWallScale * longWallScale * 4 : footprintArea * 0.2;
+  const minimumRoomArea = longWallScale
+    ? Math.min(footprintArea * 0.00005, longWallScale * longWallScale * 0.0005)
+    : footprintArea * 0.00005;
 
   const candidates = graphFaces(splitSegments).filter((shape) => {
     const bounds = shapeBounds(shape);
     const smallestSide = Math.min(bounds.width, bounds.height);
     const aspectRatio = Math.max(bounds.width, bounds.height) / Math.max(smallestSide, 1e-9);
     const fillRatio = shape.rawArea / Math.max(bounds.area, 1e-9);
-    return shape.rawArea > footprintArea * 0.00005
+    return shape.rawArea > minimumRoomArea
       && shape.rawArea < Math.min(footprintArea * 0.2, roomScaleArea)
       && smallestSide > 0
       && aspectRatio < 12
