@@ -32,6 +32,15 @@ async function directJson(response, fallback) {
   }
 }
 
+function directTextBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
 function directDwgErrorMessage(error) {
   if (!error?.message || error.message === "Failed to fetch") {
     return "The converter could not complete this large DWG yet. Arqis kept the file on the large-drawing route so we can inspect the converter result.";
@@ -70,7 +79,7 @@ async function convertLargeDwg(file) {
     body: JSON.stringify({
       fileName: conversion.outputFileName || `${file.name}.dxf`,
       extension: "dxf",
-      dxfText: conversion.dxfText
+      base64: directTextBase64(conversion.dxfText)
     })
   });
   const analysis = await directJson(
