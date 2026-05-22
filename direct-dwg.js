@@ -17,19 +17,10 @@ function directDwgCard(file, lines) {
   `;
 }
 
-function directDwgAnalysis(status, message, shapes = []) {
+function directDwgAnalysis(status, message, shapes = [], floors = []) {
   if (typeof showCadAnalysis === "function") {
-    showCadAnalysis({ status, message, shapes });
+    showCadAnalysis({ status, message, shapes, floors });
   }
-}
-
-function directTextBase64(text) {
-  const bytes = new TextEncoder().encode(text);
-  let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return btoa(binary);
 }
 
 async function directJson(response, fallback) {
@@ -43,7 +34,7 @@ async function directJson(response, fallback) {
 
 function directDwgErrorMessage(error) {
   if (!error?.message || error.message === "Failed to fetch") {
-    return "The converter could not complete this large DWG yet. Arqis is still working on the large drawing conversion route.";
+    return "The converter could not complete this large DWG yet. Arqis kept the file on the large-drawing route so we can inspect the converter result.";
   }
   return error.message;
 }
@@ -79,7 +70,7 @@ async function convertLargeDwg(file) {
     body: JSON.stringify({
       fileName: conversion.outputFileName || `${file.name}.dxf`,
       extension: "dxf",
-      base64: directTextBase64(conversion.dxfText)
+      dxfText: conversion.dxfText
     })
   });
   const analysis = await directJson(
@@ -98,7 +89,8 @@ async function convertLargeDwg(file) {
   directDwgAnalysis(
     analysis.status || "Converted CAD geometry checked",
     analysis.message || "Arqis checked the converted CAD geometry.",
-    analysis.shapes || []
+    analysis.shapes || [],
+    analysis.floors || []
   );
 }
 
@@ -111,10 +103,10 @@ async function onLargeDwgChange(event) {
   try {
     await convertLargeDwg(file);
   } catch (error) {
-    directDwgFileStatus.textContent = `${file.name} is still converting differently`;
+    directDwgFileStatus.textContent = `${file.name} needs another converter pass`;
     directDwgCard(file, [
-      "The large DWG did not complete through the current converter pass.",
-      "Arqis will keep the upload route for large CAD files separate from the small-file analyser."
+      "The large DWG did not complete through the converter.",
+      "Arqis kept it on the large-drawing route so the converter result can be inspected."
     ]);
     directDwgAnalysis(
       "Large DWG conversion not complete",
