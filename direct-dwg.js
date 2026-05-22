@@ -50,6 +50,13 @@ async function directJson(response, fallback) {
   }
 }
 
+function directDwgErrorMessage(error) {
+  if (!error?.message || error.message === "Failed to fetch") {
+    return "The converter could not complete this large DWG yet. Export one floor as DXF or DWG for the next reliable extraction pass.";
+  }
+  return error.message;
+}
+
 async function convertLargeDwg(file) {
   directDwgFileStatus.textContent = `Sending ${file.name} to the DWG converter...`;
   directDwgCard(file, [
@@ -124,7 +131,7 @@ async function onLargeDwgChange(event) {
     ]);
     directDwgAnalysis(
       "Large DWG conversion not complete",
-      error.message || "This large multi-floor DWG could not be converted yet."
+      directDwgErrorMessage(error)
     );
   }
 }
