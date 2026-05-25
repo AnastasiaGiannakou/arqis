@@ -3,7 +3,6 @@ const pdfPlanPreviewBody = document.querySelector("#planPreviewBody");
 const pdfFileStatus = document.querySelector("#fileStatus");
 const pdfRoomTabs = document.querySelector("#roomTabs");
 const pdfRoomOutline = document.querySelector("#roomOutline");
-const pdfRoomOutlineCard = document.querySelector(".room-outline-card");
 const pdfSelectedRoomName = document.querySelector("#selectedRoomName");
 const pdfSelectedRoomArea = document.querySelector("#selectedRoomArea");
 const pdfSelectedRoomFeet = document.querySelector("#selectedRoomFeet");
@@ -18,7 +17,8 @@ const pdfClearPlanBtn = document.querySelector("#clearPlanBtn");
 
 let activePdfDocument = null;
 let activePdfRender = null;
-let activePdfMainCanvas = null;
+let activePdfMainElement = null;
+let activePdfObjectUrl = "";
 
 if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -27,23 +27,29 @@ if (window.pdfjsLib) {
 const pdfStyle = document.createElement("style");
 pdfStyle.textContent = `
   .pdf-plan-canvas,
-  .pdf-main-canvas {
+  .pdf-main-canvas,
+  .pdf-main-frame {
     display: block;
     width: 100%;
-    height: auto;
     border: 1px solid var(--line, #d7ded8);
     border-radius: 6px;
     background: white;
   }
 
   .pdf-plan-canvas {
+    height: auto;
     max-height: 360px;
     object-fit: contain;
   }
 
   .pdf-main-canvas {
+    height: auto;
     max-height: min(620px, 62vh);
     object-fit: contain;
+  }
+
+  .pdf-main-frame {
+    min-height: min(720px, 68vh);
   }
 
   .pdf-plan-caption {
@@ -65,8 +71,12 @@ function clearPdfViewer() {
     activePdfRender = null;
   }
   activePdfDocument = null;
-  activePdfMainCanvas?.remove();
-  activePdfMainCanvas = null;
+  activePdfMainElement?.remove();
+  activePdfMainElement = null;
+  if (activePdfObjectUrl) {
+    URL.revokeObjectURL(activePdfObjectUrl);
+    activePdfObjectUrl = "";
+  }
   if (pdfRoomOutline) pdfRoomOutline.hidden = false;
 }
 
@@ -79,11 +89,29 @@ function setPdfMetrics(status, message) {
   pdfCadTotalFeet.textContent = "0.00 ft²";
 }
 
-function setPdfRoomState(pageNumber) {
-  pdfSelectedRoomName.textContent = `Floor ${pageNumber}`;
+function setPdfRoomState(label) {
+  pdfSelectedRoomName.textContent = label;
   pdfSelectedRoomArea.textContent = "--";
   pdfSelectedRoomFeet.textContent = "--";
-  pdfRoomTitle.textContent = `Floor ${pageNumber}`;
+  pdfRoomTitle.textContent = label;
+}
+
+function renderPdfTabs(pageCount, onClick) {
+  pdfRoomTabs.replaceChildren();
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+    const tab = document.createElement("button");
+    tab.className = `room-tab${pageNumber === 1 ? " active" : ""}`;
+    tab.type = "button";
+    tab.textContent = pageCount === 1 ? "PDF plan" : `Floor ${pageNumber}`;
+    tab.addEventListener("click", () => onClick(pageNumber));
+    pdfRoomTabs.append(tab);
+  }
+}
+
+function activatePdfTab(pageNumber) {
+  pdfRoomTabs.querySelectorAll(".room-tab").forEach((button, index) => {
+    button.classList.toggle("active", index + 1 === pageNumber);
+  });
 }
 
 async function renderPdfPage(pageNumber, canvas, maxWidth) {
@@ -107,10 +135,7 @@ async function renderPdfPage(pageNumber, canvas, maxWidth) {
 async function showPdfFloor(pageNumber) {
   if (!activePdfDocument) return;
 
-  pdfRoomTabs.querySelectorAll(".room-tab").forEach((button, index) => {
-    button.classList.toggle("active", index + 1 === pageNumber);
-  });
-
+  activatePdfTab(pageNumber);
   pdfPlanPreviewBody.replaceChildren();
   const previewCanvas = document.createElement("canvas");
   previewCanvas.className = "pdf-plan-canvas";
@@ -119,40 +144,61 @@ async function showPdfFloor(pageNumber) {
   caption.textContent = `Floor ${pageNumber} PDF plan`;
   pdfPlanPreviewBody.append(previewCanvas, caption);
 
-  activePdfMainCanvas?.remove();
-  activePdfMainCanvas = document.createElement("canvas");
-  activePdfMainCanvas.className = "pdf-main-canvas";
+  activePdfMainElement?.remove();
+  activePdfMainElement = document.createElement("canvas");
+  activePdfMainElement.className = "pdf-main-canvas";
   pdfRoomOutline.hidden = true;
-  pdfRoomOutline.before(activePdfMainCanvas);
-  setPdfRoomState(pageNumber);
+  pdfRoomOutline.before(activePdfMainElement);
+  setPdfRoomState(`Floor ${pageNumber}`);
 
   await Promise.all([
     renderPdfPage(pageNumber, previewCanvas, 520),
-    renderPdfPage(pageNumber, activePdfMainCanvas, 980)
+    renderPdfPage(pageNumber, activePdfMainElement, 980)
   ]);
 }
 
+function loadPdfEmbed(file) {
+  clearPdfViewer();
+  activePdfObjectUrl = URL.createObjectURL(file);
+  renderPdfTabs(1, () => {});
+
+  pdfPlanPreviewBody.innerHTML = `
+    <div class="plan-file-card">
+      <strong>${file.name}</strong>
+      <span>PDF opened in Arqis using the browser viewer.</span>
+      <span>Upload one floor PDF at a time for the clearest measuring workflow.</span>
+    </div>
+  `;
+
+  activePdfMainElement = document.createElement("iframe");
+  activePdfMainElement.className = "pdf-main-frame";
+  activePdfMainElement.src = activePdfObjectUrl;
+  activePdfMainElement.title = `${file.name} preview`;
+  pdfRoomOutline.hidden = true;
+  pdfRoomOutline.before(activePdfMainElement);
+
+  setPdfRoomState("PDF plan");
+  setPdfMetrics(
+    "PDF plan loaded",
+    "Arqis can now use this PDF as the plan background. The next step is tracing room boundaries and calibrating one known measurement so areas can be calculated from the PDF."
+  );
+  pdfFileStatus.textContent = `${file.name} opened as a PDF plan`;
+}
+
 async function loadPdfPlan(file) {
+  clearPdfViewer();
+
   if (!window.pdfjsLib) {
-    throw new Error("PDF rendering is still loading. Please try again in a moment.");
+    loadPdfEmbed(file);
+    return;
   }
 
-  clearPdfViewer();
   pdfFileStatus.textContent = `Rendering ${file.name}...`;
   pdfPlanPreviewBody.innerHTML = `<div class="plan-file-card"><strong>${file.name}</strong><span>Reading PDF pages as floor plans.</span></div>`;
 
   const buffer = await file.arrayBuffer();
   activePdfDocument = await pdfjsLib.getDocument({ data: buffer }).promise;
-
-  pdfRoomTabs.replaceChildren();
-  for (let pageNumber = 1; pageNumber <= activePdfDocument.numPages; pageNumber += 1) {
-    const tab = document.createElement("button");
-    tab.className = `room-tab${pageNumber === 1 ? " active" : ""}`;
-    tab.type = "button";
-    tab.textContent = `Floor ${pageNumber}`;
-    tab.addEventListener("click", () => showPdfFloor(pageNumber));
-    pdfRoomTabs.append(tab);
-  }
+  renderPdfTabs(activePdfDocument.numPages, showPdfFloor);
 
   setPdfMetrics(
     "PDF floor plan loaded",
