@@ -29,6 +29,45 @@ let pdfDraftRect = null;
 let pdfOverlay = null;
 let pdfTools = null;
 let pdfZoom = 1;
+let activePdfProjectKey = "";
+
+function getPdfProjectKey(file) {
+  return `arqis-pdf-project:${file.name}:${file.size}`;
+}
+
+function savePdfProject(silent = false) {
+  if (!activePdfProjectKey) return;
+  const payload = {
+    rooms: pdfRooms,
+    roomCounter: pdfRoomCounter,
+    activePage: activePdfPage,
+    zoom: pdfZoom,
+    savedAt: new Date().toISOString()
+  };
+  localStorage.setItem(activePdfProjectKey, JSON.stringify(payload));
+  if (!silent) {
+    setPdfMetrics(
+      "PDF floor saved",
+      "This floor and its marked rooms are saved in this browser. Re-upload the same PDF later and Arqis will restore them."
+    );
+  }
+}
+
+function restorePdfProject(file) {
+  activePdfProjectKey = getPdfProjectKey(file);
+  const saved = localStorage.getItem(activePdfProjectKey);
+  if (!saved) return false;
+  try {
+    const payload = JSON.parse(saved);
+    pdfRooms = Array.isArray(payload.rooms) ? payload.rooms : [];
+    pdfRoomCounter = Number(payload.roomCounter) || pdfRooms.length;
+    activePdfPage = Number(payload.activePage) || 1;
+    pdfZoom = Number(payload.zoom) || 1;
+    return pdfRooms.length > 0;
+  } catch {
+    return false;
+  }
+}
 
 if (window.pdfjsLib) {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -126,6 +165,19 @@ pdfStyle.textContent = `
     pointer-events: none;
   }
 
+  .pdf-selected-room-outline {
+    fill: rgba(29, 107, 79, 0.12);
+    stroke: #164c3a;
+    stroke-width: 5px;
+  }
+
+  .pdf-selected-room-label,
+  .room-outline-empty {
+    fill: #5f6f67;
+    font-size: 16px;
+    font-weight: 850;
+  }
+
   .pdf-plan-caption {
     color: var(--muted, #65736c);
     font-size: 12px;
@@ -185,6 +237,7 @@ function clearPdfViewer() {
   pdfRooms = [];
   pdfRoomCounter = 0;
   pdfZoom = 1;
+  activePdfProjectKey = "";
   pdfTools?.remove();
   pdfTools = null;
   if (activePdfObjectUrl) {
@@ -204,11 +257,61 @@ function setPdfMetrics(status, message) {
   pdfCadTotalFeet.textContent = "--";
 }
 
+function renderPdfSelectedRoomOutline(room = null) {
+  if (!pdfRoomOutline) return;
+  pdfRoomOutline.hidden = false;
+  pdfRoomOutline.replaceChildren();
+
+  if (!room) {
+    const message = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    message.setAttribute("x", "210");
+    message.setAttribute("y", "144");
+    message.setAttribute("text-anchor", "middle");
+    message.setAttribute("class", "room-outline-empty");
+    message.textContent = "Select a marked room";
+    pdfRoomOutline.append(message);
+    return;
+  }
+
+  const padding = 38;
+  const width = 420;
+  const height = 280;
+  const availableWidth = width - padding * 2;
+  const availableHeight = height - padding * 2;
+  const aspect = Math.max(room.width / Math.max(room.height, 0.001), 0.08);
+  let rectWidth = availableWidth;
+  let rectHeight = rectWidth / aspect;
+  if (rectHeight > availableHeight) {
+    rectHeight = availableHeight;
+    rectWidth = rectHeight * aspect;
+  }
+  const x = (width - rectWidth) / 2;
+  const y = (height - rectHeight) / 2;
+
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", x.toFixed(1));
+  rect.setAttribute("y", y.toFixed(1));
+  rect.setAttribute("width", rectWidth.toFixed(1));
+  rect.setAttribute("height", rectHeight.toFixed(1));
+  rect.setAttribute("rx", "4");
+  rect.setAttribute("class", "pdf-selected-room-outline");
+
+  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+  label.setAttribute("x", "210");
+  label.setAttribute("y", Math.max(24, y - 10).toFixed(1));
+  label.setAttribute("text-anchor", "middle");
+  label.setAttribute("class", "pdf-selected-room-label");
+  label.textContent = room.name;
+
+  pdfRoomOutline.append(rect, label);
+}
+
 function setPdfRoomState(label, room = null) {
   pdfSelectedRoomName.textContent = label;
   pdfSelectedRoomArea.textContent = room ? "Marked" : "--";
   pdfSelectedRoomFeet.textContent = room ? "Trace" : "--";
   pdfRoomTitle.textContent = label;
+  renderPdfSelectedRoomOutline(room);
 }
 
 function updatePdfZoomLabel() {
@@ -224,11 +327,13 @@ function applyPdfZoom() {
 function changePdfZoom(delta) {
   pdfZoom = Math.max(0.7, Math.min(3, Number((pdfZoom + delta).toFixed(2))));
   applyPdfZoom();
+  savePdfProject(true);
 }
 
 function resetPdfZoom() {
   pdfZoom = 1;
   applyPdfZoom();
+  savePdfProject(true);
 }
 
 function ensurePdfTools() {
@@ -241,6 +346,7 @@ function ensurePdfTools() {
     <span class="pdf-zoom-label" id="pdfZoomLabel">100%</span>
     <button class="pdf-tool-btn" id="pdfZoomInBtn" type="button">Zoom in</button>
     <button class="pdf-tool-btn" id="pdfZoomResetBtn" type="button">Fit</button>
+    <button class="pdf-tool-btn" id="pdfSaveProjectBtn" type="button">Save floor</button>
     <button class="pdf-tool-btn" id="pdfClearRoomsBtn" type="button">Clear all rooms</button>
   `;
   pdfRoomTabs.before(pdfTools);
@@ -248,14 +354,16 @@ function ensurePdfTools() {
   pdfTools.querySelector("#pdfZoomOutBtn").addEventListener("click", () => changePdfZoom(-0.25));
   pdfTools.querySelector("#pdfZoomInBtn").addEventListener("click", () => changePdfZoom(0.25));
   pdfTools.querySelector("#pdfZoomResetBtn").addEventListener("click", resetPdfZoom);
+  pdfTools.querySelector("#pdfSaveProjectBtn").addEventListener("click", () => savePdfProject());
   pdfTools.querySelector("#pdfClearRoomsBtn").addEventListener("click", () => {
     if (pdfRooms.length && !window.confirm("Clear all marked rooms?")) return;
     pdfRooms = [];
     pdfRoomCounter = 0;
+    savePdfProject(true);
     renderPdfTabs(activePdfDocument?.numPages || 1, activePdfDocument ? showPdfFloor : () => {});
     renderPdfRoomMarks();
     setPdfRoomState(activePdfDocument ? `Floor ${activePdfPage}` : "PDF plan");
-    setPdfMetrics("PDF plan loaded", "Mark rooms on top of the PDF plan, then use those room tabs as the first room schedule.");
+    setPdfMetrics("PDF rooms cleared", "All marked rooms were cleared for this floor. The PDF plan is still loaded.");
   });
 }
 
@@ -375,6 +483,7 @@ function deletePdfRoom(roomId) {
   if (!room) return;
   if (!window.confirm(`Clear ${room.name}?`)) return;
   pdfRooms = pdfRooms.filter((item) => item.id !== roomId);
+  savePdfProject(true);
   renderPdfTabs(activePdfDocument?.numPages || 1, activePdfDocument ? showPdfFloor : () => {});
   renderPdfRoomMarks();
   setPdfRoomState(activePdfDocument ? `Floor ${activePdfPage}` : "PDF plan");
@@ -423,6 +532,7 @@ function createPdfOverlay(surface) {
       ...rect
     };
     pdfRooms.push(room);
+    savePdfProject(true);
     renderPdfTabs(activePdfDocument?.numPages || 1, activePdfDocument ? showPdfFloor : () => {});
     selectPdfRoom(room.id);
   });
@@ -478,7 +588,7 @@ async function showPdfFloor(pageNumber) {
   const mainCanvas = document.createElement("canvas");
   mainCanvas.className = "pdf-main-canvas";
   activePdfMainElement = wrapPdfElement(mainCanvas);
-  pdfRoomOutline.hidden = true;
+  pdfRoomOutline.hidden = false;
   pdfRoomOutline.before(activePdfMainElement);
   setPdfRoomState(`Floor ${pageNumber}`);
 
@@ -494,6 +604,7 @@ function loadPdfEmbed(file) {
   ensurePdfTools();
   activePdfPage = 1;
   activePdfObjectUrl = URL.createObjectURL(file);
+  const restored = restorePdfProject(file);
   renderPdfTabs(1, () => {});
 
   pdfPlanPreviewBody.innerHTML = `
@@ -509,14 +620,21 @@ function loadPdfEmbed(file) {
   frame.src = activePdfObjectUrl;
   frame.title = `${file.name} preview`;
   activePdfMainElement = wrapPdfElement(frame);
-  pdfRoomOutline.hidden = true;
+  pdfRoomOutline.hidden = false;
   pdfRoomOutline.before(activePdfMainElement);
 
-  setPdfRoomState("PDF plan");
-  setPdfMetrics(
-    "PDF plan loaded",
-    "Use Zoom in to work close-up. Click Mark room and drag around each room. Right-click a room mark or tab to clear just that room."
-  );
+  renderPdfRoomMarks();
+  if (restored) {
+    const firstRoom = pdfRooms[0];
+    if (firstRoom) selectPdfRoom(firstRoom.id);
+    setPdfMetrics("PDF project restored", `${pdfRooms.length} marked room${pdfRooms.length === 1 ? "" : "s"} restored from this browser.`);
+  } else {
+    setPdfRoomState("PDF plan");
+    setPdfMetrics(
+      "PDF plan loaded",
+      "Use Zoom in to work close-up. Click Mark room and drag around each room. Right-click a room mark or tab to clear just that room."
+    );
+  }
   pdfFileStatus.textContent = `${file.name} opened as a PDF plan`;
 }
 
@@ -534,7 +652,8 @@ async function loadPdfPlan(file) {
 
   const buffer = await file.arrayBuffer();
   activePdfDocument = await pdfjsLib.getDocument({ data: buffer }).promise;
-  activePdfPage = 1;
+  const restored = restorePdfProject(file);
+  if (!restored) activePdfPage = 1;
   renderPdfTabs(activePdfDocument.numPages, showPdfFloor);
 
   setPdfMetrics(
@@ -542,7 +661,12 @@ async function loadPdfPlan(file) {
     `Arqis rendered ${activePdfDocument.numPages} PDF page${activePdfDocument.numPages === 1 ? "" : "s"} as floor plan views. Zoom in, click Mark room, then drag around each room to distinguish it.`
   );
   pdfFileStatus.textContent = `${file.name} rendered as ${activePdfDocument.numPages} floor page${activePdfDocument.numPages === 1 ? "" : "s"}`;
-  await showPdfFloor(1);
+  await showPdfFloor(activePdfPage);
+  if (restored && pdfRooms.length) {
+    const room = pdfRooms.find((item) => item.page === activePdfPage) || pdfRooms[0];
+    selectPdfRoom(room.id);
+    setPdfMetrics("PDF project restored", `${pdfRooms.length} marked room${pdfRooms.length === 1 ? "" : "s"} restored from this browser.`);
+  }
 }
 
 pdfPlanFile?.addEventListener("change", (event) => {
