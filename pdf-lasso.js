@@ -3,7 +3,8 @@ const lassoState = {
   rooms: [],
   overlay: null,
   activeRoomId: "",
-  projectKey: ""
+  projectKey: "",
+  dragging: null
 };
 
 const lassoStyle = document.createElement("style");
@@ -38,6 +39,18 @@ lassoStyle.textContent = `
     pointer-events: none;
   }
 
+  .lasso-corner-handle {
+    fill: #ffffff;
+    stroke: #b85f38;
+    stroke-width: 0.8px;
+    cursor: grab;
+    pointer-events: auto;
+  }
+
+  .lasso-corner-handle:active {
+    cursor: grabbing;
+  }
+
   .lasso-room-label {
     fill: #164c3a;
     font-size: 2.2px;
@@ -70,6 +83,11 @@ function lassoRestore() {
   }
 }
 
+function lassoNumber(selector, fallback) {
+  const value = Number(document.querySelector(selector)?.value);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function lassoPointString(points) {
   return points.map((point) => `${point.x * 100},${point.y * 100}`).join(" ");
 }
@@ -85,6 +103,27 @@ function lassoBounds(points) {
     width: Math.max(...xs) - x,
     height: Math.max(...ys) - y
   };
+}
+
+function lassoPolygonArea(points) {
+  if (!Array.isArray(points) || points.length < 3) return 0;
+  let sum = 0;
+  points.forEach((point, index) => {
+    const next = points[(index + 1) % points.length];
+    sum += point.x * next.y - next.x * point.y;
+  });
+  return Math.abs(sum) / 2;
+}
+
+function lassoRoomArea(room) {
+  const box = lassoBounds(room.points);
+  const boxArea = Math.max(box.width * box.height, 0.000001);
+  const shapeRatio = Math.min(1, lassoPolygonArea(room.points) / boxArea);
+  return lassoNumber("#length", 3.2) * lassoNumber("#width", 2.4) * shapeRatio;
+}
+
+function lassoFeet(metres) {
+  return metres * 10.7639;
 }
 
 function lassoOverlayPoint(event) {
@@ -124,7 +163,7 @@ function lassoDrawDraft() {
 function lassoDrawRooms() {
   const overlay = lassoState.overlay;
   if (!overlay) return;
-  overlay.querySelectorAll(".lasso-room-polygon,.lasso-room-label").forEach((node) => node.remove());
+  overlay.querySelectorAll(".lasso-room-polygon,.lasso-room-label,.lasso-corner-handle").forEach((node) => node.remove());
 
   lassoState.rooms.forEach((room) => {
     const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
@@ -146,6 +185,23 @@ function lassoDrawRooms() {
     label.setAttribute("y", `${(room.y + 0.035) * 100}%`);
     label.textContent = room.name;
     overlay.append(polygon, label);
+
+    if (room.id === lassoState.activeRoomId) {
+      room.points.forEach((point, index) => {
+        const handle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        handle.classList.add("lasso-corner-handle");
+        handle.setAttribute("cx", `${point.x * 100}`);
+        handle.setAttribute("cy", `${point.y * 100}`);
+        handle.setAttribute("r", "1.25");
+        handle.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          lassoState.dragging = { roomId: room.id, index };
+          handle.setPointerCapture(event.pointerId);
+        });
+        overlay.append(handle);
+      });
+    }
   });
 }
 
@@ -168,45 +224,85 @@ function lassoRenderTabs() {
   });
 }
 
+function lassoSvgElement(name, attrs = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+  Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, String(value)));
+  return element;
+}
+
 function lassoDrawCleanRoom(room) {
   const svg = document.querySelector("#roomOutline");
   if (!svg || !room) return;
   svg.replaceChildren();
 
-  const padding = 42;
-  const width = 420;
-  const height = 280;
+  const padding = 48;
+  const svgWidth = 420;
+  const svgHeight = 280;
   const box = lassoBounds(room.points);
   const scale = Math.min(
-    (width - padding * 2) / Math.max(box.width, 0.001),
-    (height - padding * 2) / Math.max(box.height, 0.001)
+    (svgWidth - padding * 2) / Math.max(box.width, 0.001),
+    (svgHeight - padding * 2) / Math.max(box.height, 0.001)
   );
-  const offsetX = (width - box.width * scale) / 2 - box.x * scale;
-  const offsetY = (height - box.height * scale) / 2 - box.y * scale;
-  const points = room.points.map((point) => `${(point.x * scale + offsetX).toFixed(1)},${(point.y * scale + offsetY).toFixed(1)}`).join(" ");
+  const offsetX = (svgWidth - box.width * scale) / 2 - box.x * scale;
+  const offsetY = (svgHeight - box.height * scale) / 2 - box.y * scale;
+  const scaled = room.points.map((point) => ({
+    x: point.x * scale + offsetX,
+    y: point.y * scale + offsetY
+  }));
+  const points = scaled.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const area = lassoRoomArea(room);
 
-  const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-  polygon.setAttribute("points", points);
-  polygon.setAttribute("class", "clean-room-outline");
-
-  const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  label.setAttribute("x", "210");
-  label.setAttribute("y", "140");
-  label.setAttribute("text-anchor", "middle");
-  label.setAttribute("dominant-baseline", "middle");
-  label.setAttribute("class", "clean-room-name");
+  const polygon = lassoSvgElement("polygon", { points, class: "clean-room-outline" });
+  const label = lassoSvgElement("text", {
+    x: 210,
+    y: 136,
+    "text-anchor": "middle",
+    "dominant-baseline": "middle",
+    class: "clean-room-name"
+  });
   label.textContent = room.name;
 
-  const length = document.querySelector("#length")?.value || "--";
-  const widthValue = document.querySelector("#width")?.value || "--";
-  const bottom = document.createElementNS("http://www.w3.org/2000/svg", "text");
-  bottom.setAttribute("x", "210");
-  bottom.setAttribute("y", "260");
-  bottom.setAttribute("text-anchor", "middle");
-  bottom.setAttribute("class", "clean-room-dimension-text");
-  bottom.textContent = `${Number(length).toFixed(2)} m x ${Number(widthValue).toFixed(2)} m`;
+  const areaLabel = lassoSvgElement("text", {
+    x: 210,
+    y: 160,
+    "text-anchor": "middle",
+    class: "clean-room-dimension-text"
+  });
+  areaLabel.textContent = `${area.toFixed(2)} m²`;
 
-  svg.append(polygon, label, bottom);
+  const scaleX = lassoNumber("#length", 3.2) / Math.max(box.width, 0.001);
+  const scaleY = lassoNumber("#width", 2.4) / Math.max(box.height, 0.001);
+  scaled.forEach((point, index) => {
+    const next = scaled[(index + 1) % scaled.length];
+    const original = room.points[index];
+    const originalNext = room.points[(index + 1) % room.points.length];
+    const metres = Math.hypot((originalNext.x - original.x) * scaleX, (originalNext.y - original.y) * scaleY);
+    if (metres < 0.15) return;
+    const text = lassoSvgElement("text", {
+      x: ((point.x + next.x) / 2).toFixed(1),
+      y: ((point.y + next.y) / 2 - 5).toFixed(1),
+      "text-anchor": "middle",
+      class: "clean-room-dimension-text"
+    });
+    text.textContent = `${metres.toFixed(2)} m`;
+    svg.append(text);
+  });
+
+  svg.prepend(polygon);
+  svg.append(label, areaLabel);
+}
+
+function lassoUpdateTotals(room) {
+  const area = lassoRoomArea(room);
+  const feet = lassoFeet(area);
+  document.querySelector("#selectedRoomArea").textContent = `${area.toFixed(2)} m²`;
+  document.querySelector("#selectedRoomFeet").textContent = `${feet.toFixed(2)} ft²`;
+  document.querySelector("#floorArea").textContent = `${area.toFixed(2)} m²`;
+  document.querySelector("#cadShapeCount").textContent = `${lassoState.rooms.length}`;
+  document.querySelector("#cadLargestArea").textContent = `${Math.max(...lassoState.rooms.map(lassoRoomArea), 0).toFixed(2)} m²`;
+  const total = lassoState.rooms.reduce((sum, item) => sum + lassoRoomArea(item), 0);
+  document.querySelector("#cadTotalArea").textContent = `${total.toFixed(2)} m²`;
+  document.querySelector("#cadTotalFeet").textContent = `${lassoFeet(total).toFixed(2)} ft²`;
 }
 
 function lassoSelectRoom(roomId) {
@@ -215,12 +311,10 @@ function lassoSelectRoom(roomId) {
   lassoState.activeRoomId = roomId;
   window.arqisSelectedPdfRoom = room;
   document.querySelector("#selectedRoomName").textContent = room.name;
-  document.querySelector("#selectedRoomArea").textContent = "Marked";
-  document.querySelector("#selectedRoomFeet").textContent = "Trace";
   document.querySelector("#roomTitle").textContent = room.name;
   document.querySelector("#cadStatus").textContent = "PDF lasso room marked";
-  document.querySelector("#cadMessage").textContent = `${room.name} follows a custom outline around the room shape.`;
-  document.querySelector("#cadShapeCount").textContent = `${lassoState.rooms.length}`;
+  document.querySelector("#cadMessage").textContent = `${room.name} follows a custom outline. Drag the white corner handles to amend it.`;
+  lassoUpdateTotals(room);
   lassoDrawRooms();
   lassoRenderTabs();
   lassoDrawCleanRoom(room);
@@ -286,6 +380,7 @@ function lassoAttachOverlay() {
   lassoState.overlay = overlay;
   lassoRestore();
   overlay.addEventListener("pointerdown", (event) => {
+    if (event.target?.classList?.contains("lasso-corner-handle")) return;
     if (!overlay.classList.contains("marking")) return;
     if (event.button !== 0) return;
     event.preventDefault();
@@ -301,6 +396,24 @@ function lassoAttachOverlay() {
     lassoState.points.push(point);
     lassoDrawDraft();
   }, true);
+
+  overlay.addEventListener("pointermove", (event) => {
+    if (!lassoState.dragging) return;
+    event.preventDefault();
+    const room = lassoState.rooms.find((item) => item.id === lassoState.dragging.roomId);
+    if (!room) return;
+    room.points[lassoState.dragging.index] = lassoOverlayPoint(event);
+    Object.assign(room, lassoBounds(room.points));
+    lassoSave();
+    lassoDrawRooms();
+    lassoDrawCleanRoom(room);
+    lassoUpdateTotals(room);
+  });
+
+  overlay.addEventListener("pointerup", () => {
+    lassoState.dragging = null;
+  });
+
   lassoDrawRooms();
   lassoRenderTabs();
 }
@@ -314,6 +427,15 @@ document.addEventListener("click", (event) => {
     lassoRenderTabs();
   }
 }, true);
+
+["#length", "#width"].forEach((selector) => {
+  document.querySelector(selector)?.addEventListener("input", () => {
+    const room = lassoState.rooms.find((item) => item.id === lassoState.activeRoomId);
+    if (!room) return;
+    lassoDrawCleanRoom(room);
+    lassoUpdateTotals(room);
+  });
+});
 
 new MutationObserver(() => {
   lassoEnsureTools();
