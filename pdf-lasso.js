@@ -20,13 +20,13 @@ lassoStyle.textContent = `
   .lasso-room-polygon.active {
     fill: rgba(184, 95, 56, 0.16);
     stroke: #b85f38;
-    stroke-width: 2.2px;
+    stroke-width: 2px;
   }
 
   .lasso-draft-line {
     fill: rgba(29, 107, 79, 0.08);
     stroke: #1d6b4f;
-    stroke-width: 1.8px;
+    stroke-width: 1.5px;
     stroke-dasharray: 5 4;
     vector-effect: non-scaling-stroke;
     pointer-events: none;
@@ -35,14 +35,16 @@ lassoStyle.textContent = `
   .lasso-point {
     fill: #1d6b4f;
     stroke: white;
-    stroke-width: 0.6px;
+    stroke-width: 0.4px;
+    vector-effect: non-scaling-stroke;
     pointer-events: none;
   }
 
   .lasso-corner-handle {
-    fill: #ffffff;
+    fill: rgba(255, 255, 255, 0.95);
     stroke: #b85f38;
-    stroke-width: 0.8px;
+    stroke-width: 0.45px;
+    vector-effect: non-scaling-stroke;
     cursor: grab;
     pointer-events: auto;
   }
@@ -53,11 +55,11 @@ lassoStyle.textContent = `
 
   .lasso-room-label {
     fill: #164c3a;
-    font-size: 2.2px;
+    font-size: 1.45px;
     font-weight: 850;
     paint-order: stroke;
     stroke: white;
-    stroke-width: 0.45px;
+    stroke-width: 0.28px;
     pointer-events: none;
   }
 `;
@@ -134,6 +136,11 @@ function lassoOverlayPoint(event) {
   };
 }
 
+function lassoMarkerRadius() {
+  const width = lassoState.overlay?.getBoundingClientRect().width || 900;
+  return Math.max(0.28, Math.min(0.85, 360 / width));
+}
+
 function lassoClearDraft() {
   lassoState.points = [];
   lassoState.overlay?.querySelectorAll(".lasso-draft-line,.lasso-point").forEach((node) => node.remove());
@@ -150,12 +157,13 @@ function lassoDrawDraft() {
   line.setAttribute("points", lassoPointString(lassoState.points));
   overlay.append(line);
 
+  const radius = lassoMarkerRadius();
   lassoState.points.forEach((point) => {
     const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
     dot.classList.add("lasso-point");
     dot.setAttribute("cx", `${point.x * 100}`);
     dot.setAttribute("cy", `${point.y * 100}`);
-    dot.setAttribute("r", "0.9");
+    dot.setAttribute("r", radius.toFixed(2));
     overlay.append(dot);
   });
 }
@@ -165,6 +173,7 @@ function lassoDrawRooms() {
   if (!overlay) return;
   overlay.querySelectorAll(".lasso-room-polygon,.lasso-room-label,.lasso-corner-handle").forEach((node) => node.remove());
 
+  const radius = lassoMarkerRadius();
   lassoState.rooms.forEach((room) => {
     const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
     polygon.classList.add("lasso-room-polygon");
@@ -192,7 +201,7 @@ function lassoDrawRooms() {
         handle.classList.add("lasso-corner-handle");
         handle.setAttribute("cx", `${point.x * 100}`);
         handle.setAttribute("cy", `${point.y * 100}`);
-        handle.setAttribute("r", "1.25");
+        handle.setAttribute("r", radius.toFixed(2));
         handle.addEventListener("pointerdown", (event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -441,6 +450,11 @@ new MutationObserver(() => {
   lassoEnsureTools();
   lassoAttachOverlay();
 }).observe(document.body, { childList: true, subtree: true });
+
+window.addEventListener("resize", () => {
+  lassoDrawDraft();
+  lassoDrawRooms();
+});
 
 lassoEnsureTools();
 lassoAttachOverlay();
