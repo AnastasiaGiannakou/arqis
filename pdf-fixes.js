@@ -68,6 +68,7 @@ function createSvgElement(name, attributes = {}) {
 }
 
 function drawCleanRoomOutline() {
+  if (window.arqisSelectedPdfRoom?.points?.length) return;
   if (!cleanOutlineSvg || cleanOutlineDrawing) return;
   const roomName = cleanRoomName?.textContent?.trim() || "Room";
   const hasMarkedPdfRoom = cleanRoomArea?.textContent?.trim() === "Marked";
