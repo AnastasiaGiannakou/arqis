@@ -10,7 +10,7 @@ workspaceStyle.textContent = `
     min-height: 100vh;
     padding: 32px;
     background:
-      linear-gradient(rgba(247,248,245,0.88), rgba(231,235,229,0.94)),
+      linear-gradient(rgba(247,248,245,0.9), rgba(231,235,229,0.96)),
       repeating-linear-gradient(90deg, rgba(24,32,29,0.04) 0 1px, transparent 1px 80px),
       repeating-linear-gradient(0deg, rgba(24,32,29,0.04) 0 1px, transparent 1px 80px);
   }
@@ -21,54 +21,59 @@ workspaceStyle.textContent = `
   }
 
   .workspace-shell {
-    width: min(1120px, 100%);
+    width: min(920px, 100%);
     margin: 0 auto;
     display: grid;
-    gap: 24px;
+    gap: 22px;
   }
 
   .workspace-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 18px;
-    align-items: end;
+    display: grid;
+    gap: 10px;
   }
 
   .workspace-head h1 {
-    font-size: clamp(44px, 8vw, 88px);
+    font-size: clamp(48px, 9vw, 92px);
     line-height: 0.95;
     color: var(--green-dark);
   }
 
-  .workspace-head p {
-    max-width: 48ch;
+  .workspace-head p:not(.eyebrow) {
+    max-width: 58ch;
     color: var(--muted);
     line-height: 1.5;
   }
 
-  .workspace-actions {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px;
-  }
-
   .workspace-card {
     display: grid;
-    gap: 14px;
+    gap: 16px;
     padding: 22px;
     border: 1px solid var(--line);
     border-radius: 8px;
-    background: rgba(255,255,255,0.86);
+    background: rgba(255,255,255,0.9);
     box-shadow: 0 18px 54px rgba(24,32,29,0.09);
   }
 
   .workspace-card h2 {
-    font-size: 21px;
+    font-size: 24px;
   }
 
   .workspace-card p {
     color: var(--muted);
     line-height: 1.45;
+  }
+
+  .workspace-step {
+    display: none;
+    gap: 16px;
+  }
+
+  .workspace-step.active {
+    display: grid;
+  }
+
+  .workspace-mode {
+    width: min(420px, 100%);
   }
 
   .workspace-card button {
@@ -86,6 +91,11 @@ workspaceStyle.textContent = `
     color: var(--ink);
   }
 
+  .workspace-card button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .workspace-status {
     min-height: 20px;
     color: var(--muted);
@@ -93,16 +103,43 @@ workspaceStyle.textContent = `
     font-weight: 700;
   }
 
+  .workspace-client-summary {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(247,248,245,0.92);
+  }
+
+  .workspace-client-summary strong {
+    display: block;
+    font-size: 18px;
+  }
+
   @media (max-width: 760px) {
     .workspace-screen { padding: 20px; }
-    .workspace-actions { grid-template-columns: 1fr; }
-    .workspace-head { display: grid; }
+    .workspace-card { padding: 18px; }
   }
 `;
 document.head.append(workspaceStyle);
 
-let workspaceClients = [];
+let workspaceClient = null;
 let workspaceProjects = [];
+let workspaceMode = "existing";
+
+function arqisFriendlyDbError(error) {
+  const message = error?.message || String(error || "");
+  if (message.toLowerCase().includes("row-level security")) {
+    return "Supabase is blocking this save. Run the prototype save policies SQL in Supabase, then try again.";
+  }
+  if (message.toLowerCase().includes("failed to fetch")) {
+    return "ARQIS could not reach Supabase. Check the connection and try again.";
+  }
+  return message || "Something went wrong.";
+}
 
 function workspaceCreateScreen() {
   if (document.querySelector("#workspaceScreen")) return;
@@ -112,49 +149,69 @@ function workspaceCreateScreen() {
   screen.innerHTML = `
     <div class="workspace-shell">
       <header class="workspace-head">
-        <div>
-          <p class="eyebrow">Client workspace</p>
-          <h1>ARQIS</h1>
-        </div>
-        <p>Create a client first, then keep each project, floor, and marked room under that client.</p>
+        <p class="eyebrow">Client workspace</p>
+        <h1>ARQIS</h1>
+        <p>Start by choosing the client. Then choose an existing project for that client, or create a new project before opening the measuring workspace.</p>
       </header>
 
-      <div class="workspace-actions">
-        <section class="workspace-card" aria-label="New client">
-          <h2>New Client</h2>
-          <p>Start a fresh client record and create the first project for them.</p>
-          <label>Client name<input id="workspaceNewClientName" type="text" placeholder="e.g. Nadia"></label>
-          <label>Project name<input id="workspaceNewProjectName" type="text" placeholder="e.g. Athens house"></label>
-          <button id="workspaceCreateProjectBtn" type="button">Create client project</button>
-        </section>
+      <section class="workspace-card workspace-step active" id="workspaceClientStep" aria-label="Client step">
+        <div>
+          <p class="eyebrow">Client</p>
+          <h2>Who is this for?</h2>
+        </div>
+        <div class="segmented workspace-mode" aria-label="Client mode">
+          <input id="workspaceModeExisting" name="workspaceMode" type="radio" value="existing" checked>
+          <label for="workspaceModeExisting">Sign in</label>
+          <input id="workspaceModeNew" name="workspaceMode" type="radio" value="new">
+          <label for="workspaceModeNew">New client</label>
+        </div>
+        <label>Client name<input id="workspaceClientName" type="text" placeholder="e.g. Nadia"></label>
+        <button id="workspaceContinueClientBtn" type="button">Continue</button>
+      </section>
 
-        <section class="workspace-card" aria-label="Open client">
-          <h2>Open Client</h2>
-          <p>Choose an existing client and open one of their saved projects.</p>
-          <label>Client<select id="workspaceClientSelect"><option value="">Loading clients...</option></select></label>
-          <label>Project<select id="workspaceProjectSelect"><option value="">Choose a client first</option></select></label>
-          <div class="grid two">
-            <button id="workspaceOpenProjectBtn" type="button">Open project</button>
-            <button class="secondary-action" id="workspaceRefreshBtn" type="button">Refresh</button>
+      <section class="workspace-card workspace-step" id="workspaceProjectStep" aria-label="Project step">
+        <div class="workspace-client-summary">
+          <div>
+            <span class="eyebrow">Client</span>
+            <strong id="workspaceClientSummary">Client</strong>
           </div>
-        </section>
-      </div>
+          <button class="secondary-action" id="workspaceBackToClientBtn" type="button">Change</button>
+        </div>
+        <div>
+          <p class="eyebrow">Project</p>
+          <h2>Choose project or create one</h2>
+        </div>
+        <label>Existing project<select id="workspaceProjectSelect"><option value="">Loading projects...</option></select></label>
+        <div class="grid two">
+          <button id="workspaceOpenProjectBtn" type="button">Open project</button>
+          <button class="secondary-action" id="workspaceRefreshBtn" type="button">Refresh</button>
+        </div>
+        <label>New project name<input id="workspaceNewProjectName" type="text" placeholder="e.g. Athens house"></label>
+        <button id="workspaceCreateProjectBtn" type="button">Create new project</button>
+      </section>
 
       <p class="workspace-status" id="workspaceStatus"></p>
     </div>
   `;
   document.body.append(screen);
 
-  document.querySelector("#workspaceCreateProjectBtn").addEventListener("click", workspaceCreateClientProject);
+  document.querySelector("#workspaceContinueClientBtn").addEventListener("click", workspaceContinueClient);
+  document.querySelector("#workspaceCreateProjectBtn").addEventListener("click", workspaceCreateProject);
   document.querySelector("#workspaceOpenProjectBtn").addEventListener("click", workspaceOpenSelectedProject);
-  document.querySelector("#workspaceRefreshBtn").addEventListener("click", workspaceLoadClients);
-  document.querySelector("#workspaceClientSelect").addEventListener("change", (event) => workspaceLoadProjects(event.target.value));
+  document.querySelector("#workspaceRefreshBtn").addEventListener("click", () => workspaceLoadProjects(workspaceClient?.id));
+  document.querySelector("#workspaceBackToClientBtn").addEventListener("click", workspaceBackToClient);
+  document.querySelectorAll("input[name='workspaceMode']").forEach((radio) => {
+    radio.addEventListener("change", (event) => {
+      workspaceMode = event.target.value;
+      workspaceStatus(workspaceMode === "new" ? "Add the client name, then create their first project." : "Type an existing client name to sign in.");
+    });
+  });
 }
 
 function workspaceShow() {
   workspaceCreateScreen();
   document.body.classList.add("entered", "workspace-selecting");
-  workspaceLoadClients();
+  workspaceStatus("Type a client name to begin.");
 }
 
 function workspaceEnterProject() {
@@ -167,34 +224,67 @@ function workspaceStatus(message) {
   if (status) status.textContent = message || "";
 }
 
-async function workspaceLoadClients() {
-  workspaceCreateScreen();
-  const clientSelect = document.querySelector("#workspaceClientSelect");
-  const projectSelect = document.querySelector("#workspaceProjectSelect");
-  clientSelect.innerHTML = `<option value="">Loading clients...</option>`;
-  projectSelect.innerHTML = `<option value="">Choose a client first</option>`;
+function workspaceSetStep(step) {
+  document.querySelector("#workspaceClientStep")?.classList.toggle("active", step === "client");
+  document.querySelector("#workspaceProjectStep")?.classList.toggle("active", step === "project");
+}
 
+function workspaceBackToClient() {
+  workspaceClient = null;
+  workspaceProjects = [];
+  workspaceSetStep("client");
+  workspaceStatus("Type a client name to begin.");
+}
+
+async function workspaceFindClientByName(clientName) {
+  const db = await arqisInitDb();
+  const { data, error } = await db
+    .from("clients")
+    .select("id,name,created_at")
+    .ilike("name", clientName)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data?.[0] || null;
+}
+
+async function workspaceCreateClient(clientName) {
+  const db = await arqisInitDb();
+  const { data: client, error } = await db
+    .from("clients")
+    .insert({ name: clientName })
+    .select("id,name,created_at")
+    .single();
+  if (error) throw error;
+  return client;
+}
+
+async function workspaceContinueClient() {
+  const clientName = document.querySelector("#workspaceClientName")?.value?.trim();
+  if (!clientName) {
+    workspaceStatus("Add a client name first.");
+    return;
+  }
+
+  workspaceStatus(workspaceMode === "new" ? "Creating client..." : "Finding client...");
   try {
-    const db = await arqisInitDb();
-    const { data, error } = await db
-      .from("clients")
-      .select("id,name,created_at")
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-
-    workspaceClients = data || [];
-    clientSelect.replaceChildren();
-    if (!workspaceClients.length) {
-      clientSelect.append(new Option("No clients yet", ""));
-      workspaceStatus("Create the first client to begin.");
-      return;
+    const existingClient = await workspaceFindClientByName(clientName);
+    if (workspaceMode === "existing") {
+      if (!existingClient) {
+        workspaceStatus(`No client called ${clientName} yet. Choose New client to create them.`);
+        return;
+      }
+      workspaceClient = existingClient;
+    } else {
+      workspaceClient = existingClient || await workspaceCreateClient(clientName);
     }
-    clientSelect.append(new Option("Choose a client", ""));
-    workspaceClients.forEach((client) => clientSelect.append(new Option(client.name, client.id)));
-    workspaceStatus("");
+
+    document.querySelector("#workspaceClientSummary").textContent = workspaceClient.name;
+    document.querySelector("#workspaceNewProjectName").value = "";
+    workspaceSetStep("project");
+    await workspaceLoadProjects(workspaceClient.id);
   } catch (error) {
-    clientSelect.innerHTML = `<option value="">Could not load clients</option>`;
-    workspaceStatus(error.message || "Could not load clients.");
+    workspaceStatus(arqisFriendlyDbError(error));
   }
 }
 
@@ -218,14 +308,16 @@ async function workspaceLoadProjects(clientId) {
     workspaceProjects = data || [];
     projectSelect.replaceChildren();
     if (!workspaceProjects.length) {
-      projectSelect.append(new Option("No projects for this client", ""));
+      projectSelect.append(new Option("No projects yet", ""));
+      workspaceStatus("Create the first project for this client.");
       return;
     }
     projectSelect.append(new Option("Choose a project", ""));
     workspaceProjects.forEach((project) => projectSelect.append(new Option(project.name, project.id)));
+    workspaceStatus("Choose a project, or create a new one.");
   } catch (error) {
     projectSelect.innerHTML = `<option value="">Could not load projects</option>`;
-    workspaceStatus(error.message || "Could not load projects.");
+    workspaceStatus(arqisFriendlyDbError(error));
   }
 }
 
@@ -247,39 +339,35 @@ function workspacePrepareBlankProject(clientName, projectName) {
   document.querySelector("#cadTotalFeet").textContent = "--";
 }
 
-async function workspaceCreateClientProject() {
-  const clientName = document.querySelector("#workspaceNewClientName")?.value?.trim();
+async function workspaceCreateProject() {
   const projectName = document.querySelector("#workspaceNewProjectName")?.value?.trim();
-  if (!clientName || !projectName) {
-    workspaceStatus("Add both client name and project name.");
+  if (!workspaceClient?.id) {
+    workspaceStatus("Choose a client first.");
+    return;
+  }
+  if (!projectName) {
+    workspaceStatus("Add a project name first.");
     return;
   }
 
-  workspaceStatus("Creating client project...");
+  workspaceStatus("Creating project...");
   try {
     const db = await arqisInitDb();
-    const { data: client, error: clientError } = await db
-      .from("clients")
-      .insert({ name: clientName })
-      .select("id,name")
-      .single();
-    if (clientError) throw clientError;
-
     const { data: project, error: projectError } = await db
       .from("projects")
-      .insert({ client_id: client.id, name: projectName, status: "draft" })
+      .insert({ client_id: workspaceClient.id, name: projectName, status: "draft" })
       .select("id,name")
       .single();
     if (projectError) throw projectError;
 
-    workspacePrepareBlankProject(client.name, project.name);
+    workspacePrepareBlankProject(workspaceClient.name, project.name);
     workspaceEnterProject();
     await arqisRefreshProjectList();
     const projectSelect = document.querySelector("#arqisProjectSelect");
     if (projectSelect) projectSelect.value = project.id;
-    document.querySelector("#arqisSaveStatus").textContent = `Created ${client.name} / ${project.name}`;
+    document.querySelector("#arqisSaveStatus").textContent = `Created ${workspaceClient.name} / ${project.name}`;
   } catch (error) {
-    workspaceStatus(error.message || "Could not create client project.");
+    workspaceStatus(arqisFriendlyDbError(error));
   }
 }
 
@@ -314,7 +402,7 @@ async function workspaceOpenSelectedProject() {
     if (projectSelect) projectSelect.value = project.id;
     document.querySelector("#arqisSaveStatus").textContent = `Opened ${project.clients?.name || "client"} / ${project.name}`;
   } catch (error) {
-    workspaceStatus(error.message || "Could not open project.");
+    workspaceStatus(arqisFriendlyDbError(error));
   }
 }
 
