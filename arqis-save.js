@@ -62,7 +62,7 @@ async function arqisSaveIntoCurrentProject(event) {
     const projectSelect = document.querySelector("#arqisProjectSelect");
     if (projectSelect) projectSelect.value = projectId;
   } catch (error) {
-    status.textContent = error.message || "Save failed";
+    status.textContent = typeof arqisFriendlyDbError === "function" ? arqisFriendlyDbError(error) : error.message || "Save failed";
   } finally {
     saveButton.disabled = false;
   }
