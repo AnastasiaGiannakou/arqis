@@ -78,6 +78,23 @@ function directPercentile(values, ratio) {
   return sorted[Math.floor((sorted.length - 1) * ratio)];
 }
 
+function directRoomishShape(shape) {
+  const bounds = directShapeBounds(shape);
+  const smallestSide = Math.min(bounds.width, bounds.height);
+  const aspectRatio = Math.max(bounds.width, bounds.height) / Math.max(smallestSide, 1e-9);
+  const fillRatio = shape.rawArea / Math.max(bounds.width * bounds.height, 1e-9);
+  return shape.rawArea > 5
+    && smallestSide > 0.8
+    && aspectRatio < 6
+    && fillRatio > 0.12;
+}
+
+function directLikelyPlanGroup(group) {
+  const roomishCount = group.shapes.filter(directRoomishShape).length;
+  const totalArea = group.shapes.reduce((sum, shape) => sum + (shape.rawArea || 0), 0);
+  return group.shapes.length >= 4 && roomishCount >= 2 && totalArea > 35;
+}
+
 function directFloorCandidates(shapes) {
   if (!shapes.length) return [];
   const measured = shapes.map((shape) => ({ shape, bounds: directShapeBounds(shape) }));
@@ -99,12 +116,17 @@ function directFloorCandidates(shapes) {
     }
   }
 
-  return groups
-    .sort((left, right) => right.bounds.maxY - left.bounds.maxY || left.bounds.minX - right.bounds.minX)
-    .map((group, index) => ({
-      name: groups.length === 1 ? "Plan floor" : `Floor ${index + 1}`,
-      shapes: group.shapes
-    }));
+  const sortedGroups = groups
+    .sort((left, right) => right.shapes.length - left.shapes.length
+      || right.bounds.maxY - left.bounds.maxY
+      || left.bounds.minX - right.bounds.minX);
+  const planGroups = sortedGroups.filter(directLikelyPlanGroup);
+  const usableGroups = planGroups.length ? planGroups : sortedGroups;
+
+  return usableGroups.map((group, index) => ({
+    name: usableGroups.length === 1 ? "Plan floor" : `Floor ${index + 1}`,
+    shapes: group.shapes
+  }));
 }
 
 function directSvgPoint(point, bounds) {
@@ -284,7 +306,7 @@ function directRenderFloors(status, message, floors) {
       });
       showCadAnalysis({
         status: `${status} - ${floor.name}`,
-        message: `${message} Choose a floor first, then check its room tabs.`,
+        message: `${message} Elevation and section sheets are filtered where possible; check the remaining tabs.`,
         shapes: floor.shapes
       });
       directFloorOverview(floor);
@@ -294,7 +316,7 @@ function directRenderFloors(status, message, floors) {
 
   showCadAnalysis({
     status: `${status} - ${floors[0].name}`,
-    message: `${message} Choose a floor first, then check its room tabs.`,
+    message: `${message} Elevation and section sheets are filtered where possible; check the remaining tabs.`,
     shapes: floors[0].shapes
   });
   directFloorOverview(floors[0]);
@@ -334,6 +356,17 @@ function directDwgErrorMessage(error) {
     return "The converter could not complete this DWG yet. Arqis kept the file on the converter route so we can inspect the result.";
   }
   return error.message;
+}
+
+function directAutoUseMetresForDwg(shapes) {
+  if (!cadUnits || cadUnits.value !== "mm" || !shapes.length) return;
+  const rawAreas = shapes.map((shape) => shape.rawArea || 0).filter((area) => area > 0);
+  const largestAsMm = Math.max(...rawAreas) * 0.001 * 0.001;
+  const largestRaw = Math.max(...rawAreas);
+  if (largestRaw > 3 && largestRaw < 500 && largestAsMm < 0.1) {
+    cadUnits.value = "m";
+    cadUnits.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 }
 
 async function convertDwg(file) {
@@ -380,12 +413,14 @@ async function convertDwg(file) {
     throw new Error(analysis.message || "The converted CAD geometry could not be analysed.");
   }
 
+  const shapes = analysis.shapes || [];
+  directAutoUseMetresForDwg(shapes);
   directDwgFileStatus.textContent = `${file.name} converted and checked`;
   directDwgPdfCard(file, conversion);
   directDwgAnalysis(
     analysis.status || "Converted CAD geometry checked",
     analysis.message || "Arqis checked the converted CAD geometry.",
-    analysis.shapes || [],
+    shapes,
     analysis.floors || []
   );
 }
