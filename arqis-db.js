@@ -3,6 +3,8 @@ const ARQIS_SUPABASE_KEY = "sb_publishable_K-7BG5-YdarJj1isaNA9EQ_eE7rnh4G";
 
 let arqisDbClient = null;
 let arqisDbReady = false;
+let arqisSavedProjects = [];
+let arqisLoadedRooms = [];
 
 function arqisLoadScript(src) {
   return new Promise((resolve, reject) => {
@@ -42,10 +44,23 @@ function arqisAddDatabasePanel() {
     <label>Client name<input id="arqisClientName" type="text" placeholder="Client name"></label>
     <label>Project name<input id="arqisProjectName" type="text" placeholder="Project name"></label>
     <button class="secondary" id="arqisSaveProjectBtn" type="button">Save project</button>
+    <label>
+      Open saved project
+      <select id="arqisProjectSelect">
+        <option value="">Loading saved projects...</option>
+      </select>
+    </label>
+    <div class="grid two">
+      <button class="secondary" id="arqisOpenProjectBtn" type="button">Open</button>
+      <button class="secondary" id="arqisRefreshProjectsBtn" type="button">Refresh</button>
+    </div>
     <p class="status" id="arqisSaveStatus">Not saved yet</p>
   `;
   controls.insertBefore(panel, firstPanel);
   document.querySelector("#arqisSaveProjectBtn").addEventListener("click", arqisSaveCurrentProject);
+  document.querySelector("#arqisOpenProjectBtn").addEventListener("click", arqisOpenSelectedProject);
+  document.querySelector("#arqisRefreshProjectsBtn").addEventListener("click", arqisRefreshProjectList);
+  arqisRefreshProjectList();
 }
 
 function arqisSafeNumber(selector) {
@@ -67,6 +82,7 @@ function arqisCurrentFileName() {
 
 function arqisRoomPolygon(room) {
   if (Array.isArray(room.points)) return room.points;
+  if (Array.isArray(room.polygon)) return room.polygon;
   if (Number.isFinite(room.x) && Number.isFinite(room.y) && Number.isFinite(room.width) && Number.isFinite(room.height)) {
     return [
       { x: room.x, y: room.y },
@@ -78,9 +94,25 @@ function arqisRoomPolygon(room) {
   return [];
 }
 
+function arqisPolygonBounds(points) {
+  const xs = points.map((point) => Number(point.x)).filter(Number.isFinite);
+  const ys = points.map((point) => Number(point.y)).filter(Number.isFinite);
+  if (!xs.length || !ys.length) return { x: 0, y: 0, width: 1, height: 1 };
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return {
+    x,
+    y,
+    width: Math.max(...xs) - x || 1,
+    height: Math.max(...ys) - y || 1
+  };
+}
+
 function arqisRoomArea(room) {
   if (typeof lassoRoomArea === "function" && Array.isArray(room.points)) return lassoRoomArea(room);
   if (Number.isFinite(room.areaM2)) return room.areaM2;
+  if (Number.isFinite(room.area_m2)) return room.area_m2;
+  if (Number.isFinite(room.floor_area_m2)) return room.floor_area_m2;
   const length = arqisSafeNumber("#length");
   const width = arqisSafeNumber("#width");
   return length && width ? length * width : null;
@@ -121,6 +153,200 @@ function arqisCollectRooms() {
       }
     };
   });
+}
+
+async function arqisRefreshProjectList() {
+  const select = document.querySelector("#arqisProjectSelect");
+  const status = document.querySelector("#arqisSaveStatus");
+  if (!select) return;
+  select.innerHTML = `<option value="">Loading saved projects...</option>`;
+
+  try {
+    const db = await arqisInitDb();
+    const { data, error } = await db
+      .from("projects")
+      .select("id,name,created_at,clients(id,name)")
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+
+    arqisSavedProjects = data || [];
+    select.replaceChildren();
+    if (!arqisSavedProjects.length) {
+      select.append(new Option("No saved projects yet", ""));
+      return;
+    }
+    select.append(new Option("Choose a project", ""));
+    arqisSavedProjects.forEach((project) => {
+      const clientName = project.clients?.name || "No client";
+      select.append(new Option(`${clientName} - ${project.name}`, project.id));
+    });
+  } catch (error) {
+    select.innerHTML = `<option value="">Could not load projects</option>`;
+    if (status) status.textContent = error.message || "Could not load saved projects";
+  }
+}
+
+function arqisSvgElement(name, attrs = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+  Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, String(value)));
+  return element;
+}
+
+function arqisNormalisePolygon(points) {
+  const box = arqisPolygonBounds(points);
+  const width = 420;
+  const height = 280;
+  const padding = 44;
+  const scale = Math.min(
+    (width - padding * 2) / Math.max(box.width, 0.000001),
+    (height - padding * 2) / Math.max(box.height, 0.000001)
+  );
+  const offsetX = (width - box.width * scale) / 2 - box.x * scale;
+  const offsetY = (height - box.height * scale) / 2 - box.y * scale;
+  return points.map((point) => ({
+    x: Number(point.x) * scale + offsetX,
+    y: Number(point.y) * scale + offsetY
+  }));
+}
+
+function arqisDrawLoadedRoom(room) {
+  const svg = document.querySelector("#roomOutline");
+  if (!svg) return;
+  const polygon = arqisRoomPolygon(room);
+  svg.hidden = false;
+  svg.replaceChildren();
+
+  if (polygon.length < 3) {
+    const text = arqisSvgElement("text", {
+      x: 210,
+      y: 144,
+      "text-anchor": "middle",
+      fill: "#65736c",
+      "font-size": 16,
+      "font-weight": 800
+    });
+    text.textContent = "Saved room has no outline yet";
+    svg.append(text);
+    return;
+  }
+
+  const scaled = arqisNormalisePolygon(polygon);
+  const points = scaled.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const area = arqisRoomArea(room);
+  const shape = arqisSvgElement("polygon", { points, class: "clean-room-outline" });
+  const label = arqisSvgElement("text", {
+    x: 210,
+    y: 136,
+    "text-anchor": "middle",
+    "dominant-baseline": "middle",
+    class: "clean-room-name"
+  });
+  label.textContent = room.name;
+  const areaLabel = arqisSvgElement("text", {
+    x: 210,
+    y: 160,
+    "text-anchor": "middle",
+    class: "clean-room-dimension-text"
+  });
+  areaLabel.textContent = Number.isFinite(area) ? `${area.toFixed(2)} m²` : "Area not measured";
+  svg.append(shape, label, areaLabel);
+}
+
+function arqisSelectLoadedRoom(index) {
+  const room = arqisLoadedRooms[index];
+  if (!room) return;
+  const area = arqisRoomArea(room);
+  document.querySelector("#selectedRoomName").textContent = room.name;
+  document.querySelector("#selectedRoomArea").textContent = Number.isFinite(area) ? `${area.toFixed(2)} m²` : "--";
+  document.querySelector("#selectedRoomFeet").textContent = Number.isFinite(area) ? `${(area * 10.7639).toFixed(2)} ft²` : "--";
+  document.querySelector("#roomTitle").textContent = room.name;
+  document.querySelectorAll("#roomTabs .room-tab").forEach((tab, tabIndex) => {
+    tab.classList.toggle("active", tabIndex === index);
+  });
+  if (Number.isFinite(room.length_m)) document.querySelector("#length").value = room.length_m;
+  if (Number.isFinite(room.width_m)) document.querySelector("#width").value = room.width_m;
+  if (Number.isFinite(room.height_m || room.ceiling_height_m)) document.querySelector("#height").value = room.height_m || room.ceiling_height_m;
+  arqisDrawLoadedRoom(room);
+  if (typeof calculate === "function") calculate();
+}
+
+function arqisRenderLoadedProject(project, floor) {
+  const tabs = document.querySelector("#roomTabs");
+  const preview = document.querySelector("#planPreviewBody");
+  const fileStatus = document.querySelector("#fileStatus");
+  const cadStatus = document.querySelector("#cadStatus");
+  const cadMessage = document.querySelector("#cadMessage");
+  const cadShapeCount = document.querySelector("#cadShapeCount");
+  const cadLargestArea = document.querySelector("#cadLargestArea");
+  const cadTotalArea = document.querySelector("#cadTotalArea");
+  const cadTotalFeet = document.querySelector("#cadTotalFeet");
+
+  arqisLoadedRooms = (floor?.rooms || []).map((room) => ({ ...room, points: room.polygon || [] }));
+  tabs.replaceChildren();
+  preview.innerHTML = `
+    <div class="plan-file-card">
+      <strong>${project.name}</strong>
+      <span>Saved project loaded from Supabase.</span>
+      <span>The room data is restored. The original PDF/DWG background will come next with file storage.</span>
+    </div>
+  `;
+  fileStatus.textContent = floor?.source_file_name ? `${floor.source_file_name} loaded from saved project` : `${project.name} loaded from saved project`;
+
+  arqisLoadedRooms.forEach((room, index) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = `room-tab${index === 0 ? " active" : ""}`;
+    tab.textContent = room.name;
+    tab.addEventListener("click", () => arqisSelectLoadedRoom(index));
+    tabs.append(tab);
+  });
+
+  const areas = arqisLoadedRooms.map(arqisRoomArea).filter(Number.isFinite);
+  const total = areas.reduce((sum, area) => sum + area, 0);
+  cadStatus.textContent = "Saved project loaded";
+  cadMessage.textContent = `${project.name} loaded with ${arqisLoadedRooms.length} saved room${arqisLoadedRooms.length === 1 ? "" : "s"}.`;
+  cadShapeCount.textContent = `${arqisLoadedRooms.length}`;
+  cadLargestArea.textContent = areas.length ? `${Math.max(...areas).toFixed(2)} m²` : "--";
+  cadTotalArea.textContent = areas.length ? `${total.toFixed(2)} m²` : "--";
+  cadTotalFeet.textContent = areas.length ? `${(total * 10.7639).toFixed(2)} ft²` : "--";
+
+  if (arqisLoadedRooms.length) {
+    arqisSelectLoadedRoom(0);
+  } else {
+    document.querySelector("#roomTitle").textContent = floor?.name || project.name;
+    document.querySelector("#selectedRoomName").textContent = "No room selected";
+    document.querySelector("#selectedRoomArea").textContent = "--";
+    document.querySelector("#selectedRoomFeet").textContent = "--";
+    arqisDrawLoadedRoom({ name: "No room selected", polygon: [] });
+  }
+}
+
+async function arqisOpenSelectedProject() {
+  const status = document.querySelector("#arqisSaveStatus");
+  const projectId = document.querySelector("#arqisProjectSelect")?.value;
+  if (!projectId) {
+    status.textContent = "Choose a saved project first";
+    return;
+  }
+
+  status.textContent = "Opening saved project...";
+  try {
+    const db = await arqisInitDb();
+    const { data: project, error } = await db
+      .from("projects")
+      .select("id,name,status,created_at,clients(id,name),floors(id,name,source_file_name,source_file_type,page_number,rooms(id,name,room_type,area_m2,floor_area_m2,length_m,width_m,height_m,ceiling_height_m,wall_lengths,polygon,costing,measured_dimensions))")
+      .eq("id", projectId)
+      .single();
+    if (error) throw error;
+
+    const floor = project.floors?.[0] || null;
+    document.querySelector("#arqisClientName").value = project.clients?.name || "";
+    document.querySelector("#arqisProjectName").value = project.name || "";
+    arqisRenderLoadedProject(project, floor);
+    status.textContent = `Opened ${project.clients?.name || "client"} / ${project.name}`;
+  } catch (error) {
+    status.textContent = error.message || "Could not open saved project";
+  }
 }
 
 async function arqisSaveCurrentProject() {
@@ -175,6 +401,8 @@ async function arqisSaveCurrentProject() {
     }
 
     status.textContent = `Saved ${clientName} / ${projectName} with ${rooms.length} room${rooms.length === 1 ? "" : "s"}`;
+    await arqisRefreshProjectList();
+    document.querySelector("#arqisProjectSelect").value = project.id;
   } catch (error) {
     status.textContent = error.message || "Save failed";
   } finally {
