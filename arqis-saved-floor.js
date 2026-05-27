@@ -36,34 +36,39 @@ savedFloorStyle.textContent = `
     inset: 0;
     width: 100%;
     height: 100%;
-    pointer-events: none;
+    pointer-events: auto;
+    touch-action: none;
   }
 
-  .saved-plan-room {
-    fill: rgba(29, 107, 79, 0.12);
-    stroke: #164c3a;
-    stroke-width: 0.35px;
-    vector-effect: non-scaling-stroke;
+  .saved-edit-tools {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 8px;
   }
 
-  .saved-plan-room.active {
-    fill: rgba(184, 95, 56, 0.18);
-    stroke: #b85f38;
-    stroke-width: 0.45px;
+  .saved-edit-tools .pdf-tool-btn {
+    min-height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--line, #d7ded8);
+    border-radius: 6px;
+    background: white;
+    color: var(--ink, #18201d);
+    font-weight: 800;
   }
 
-  .saved-plan-label {
-    fill: #164c3a;
-    font-size: 1.6px;
-    font-weight: 850;
-    paint-order: stroke;
-    stroke: white;
-    stroke-width: 0.35px;
+  .saved-edit-tools .pdf-tool-btn.active {
+    background: var(--green-dark, #164c3a);
+    color: white;
   }
 `;
 document.head.append(savedFloorStyle);
 
 function arqisCaptureFloorPreview() {
+  const savedImage = document.querySelector(".saved-plan-image");
+  if (savedImage?.src?.startsWith("data:image/")) return savedImage.src;
+
   const canvas = document.querySelector(".pdf-main-canvas");
   if (!canvas || !canvas.width || !canvas.height) return null;
 
@@ -115,22 +120,100 @@ async function arqisFetchProjectWithLatestFloor(projectId) {
   return { ...project, floors: floor ? [{ ...floor, rooms }] : [] };
 }
 
-function arqisSavedRoomPolygonPoints(room) {
-  return arqisRoomPolygon(room)
-    .map((point) => `${Number(point.x) * 100},${Number(point.y) * 100}`)
-    .join(" ");
+function arqisNormaliseSavedRoom(room) {
+  const points = arqisRoomPolygon(room).map((point) => ({
+    x: Number(point.x),
+    y: Number(point.y)
+  })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const bounds = points.length ? lassoBounds(points) : { x: 0, y: 0, width: 0, height: 0 };
+  return {
+    ...room,
+    id: room.id || (crypto.randomUUID ? crypto.randomUUID() : `saved-${Date.now()}-${Math.random()}`),
+    name: room.name || "Room",
+    points,
+    ...bounds
+  };
 }
 
-function arqisSavedRoomLabelPoint(room) {
-  const points = arqisRoomPolygon(room);
-  if (!points.length) return { x: 50, y: 50 };
-  const x = points.reduce((sum, point) => sum + Number(point.x || 0), 0) / points.length;
-  const y = points.reduce((sum, point) => sum + Number(point.y || 0), 0) / points.length;
-  return { x: x * 100, y: y * 100 };
+function arqisEnsureSavedEditTools() {
+  if (document.querySelector("#savedEditTools")) return;
+  const tabs = document.querySelector("#roomTabs");
+  if (!tabs) return;
+  const tools = document.createElement("div");
+  tools.className = "saved-edit-tools";
+  tools.id = "savedEditTools";
+  tools.innerHTML = `
+    <button class="pdf-tool-btn" id="savedMarkRoomBtn" type="button">Mark room</button>
+    <button class="pdf-tool-btn" id="savedFinishRoomBtn" type="button">Finish room</button>
+    <button class="pdf-tool-btn" id="savedUndoPointBtn" type="button">Undo point</button>
+    <button class="pdf-tool-btn" id="savedClearRoomsBtn" type="button">Clear all rooms</button>
+  `;
+  tabs.before(tools);
+
+  tools.querySelector("#savedMarkRoomBtn").addEventListener("click", () => {
+    const overlay = document.querySelector(".saved-plan-overlay");
+    const active = !overlay?.classList.contains("marking");
+    overlay?.classList.toggle("marking", active);
+    tools.querySelector("#savedMarkRoomBtn").classList.toggle("active", active);
+    document.querySelector("#cadStatus").textContent = active ? "Room editing active" : "Saved floor plan loaded";
+    document.querySelector("#cadMessage").textContent = active
+      ? "Click around the room boundary, then choose Finish room. Drag white handles to amend a selected room."
+      : "Select a room to edit it, or use Mark room to add another room.";
+  });
+
+  tools.querySelector("#savedFinishRoomBtn").addEventListener("click", () => {
+    if (typeof lassoFinishRoom === "function") lassoFinishRoom();
+    document.querySelector(".saved-plan-overlay")?.classList.remove("marking");
+    tools.querySelector("#savedMarkRoomBtn")?.classList.remove("active");
+  });
+
+  tools.querySelector("#savedUndoPointBtn").addEventListener("click", () => {
+    if (typeof lassoState !== "undefined") {
+      lassoState.points.pop();
+      if (typeof lassoDrawDraft === "function") lassoDrawDraft();
+    }
+  });
+
+  tools.querySelector("#savedClearRoomsBtn").addEventListener("click", () => {
+    if (typeof lassoState === "undefined") return;
+    if (lassoState.rooms.length && !window.confirm("Clear all rooms on this saved floor?")) return;
+    lassoState.rooms = [];
+    lassoState.activeRoomId = "";
+    lassoState.points = [];
+    if (typeof lassoSave === "function") lassoSave();
+    if (typeof lassoDrawDraft === "function") lassoDrawDraft();
+    if (typeof lassoDrawRooms === "function") lassoDrawRooms();
+    if (typeof lassoRenderTabs === "function") lassoRenderTabs();
+    document.querySelector("#cadShapeCount").textContent = "0";
+    document.querySelector("#cadLargestArea").textContent = "--";
+    document.querySelector("#cadTotalArea").textContent = "--";
+    document.querySelector("#cadTotalFeet").textContent = "--";
+  });
 }
 
-function arqisRenderSavedPlan(floor, rooms, activeRoomId = "") {
+function arqisActivateSavedFloorEditing(rooms) {
+  if (typeof lassoState === "undefined") return;
+  lassoState.points = [];
+  lassoState.rooms = rooms.map(arqisNormaliseSavedRoom).filter((room) => room.points.length >= 3);
+  lassoState.activeRoomId = lassoState.rooms[0]?.id || "";
+  lassoState.projectKey = `arqis-saved-floor:${document.querySelector("#arqisProjectSelect")?.value || "project"}`;
+  arqisEnsureSavedEditTools();
+
+  const overlay = document.querySelector(".saved-plan-overlay");
+  if (overlay) {
+    overlay.classList.add("pdf-room-overlay");
+    lassoState.overlay = null;
+    if (typeof lassoAttachOverlay === "function") lassoAttachOverlay();
+  }
+
+  if (typeof lassoDrawRooms === "function") lassoDrawRooms();
+  if (typeof lassoRenderTabs === "function") lassoRenderTabs();
+  if (lassoState.activeRoomId && typeof lassoSelectRoom === "function") lassoSelectRoom(lassoState.activeRoomId);
+}
+
+function arqisRenderSavedPlan(floor) {
   document.querySelector(".saved-plan-wrap")?.remove();
+  document.querySelector("#savedEditTools")?.remove();
   if (!floor?.preview_image_url) return;
 
   const outline = document.querySelector("#roomOutline");
@@ -140,34 +223,10 @@ function arqisRenderSavedPlan(floor, rooms, activeRoomId = "") {
   wrap.innerHTML = `
     <div class="saved-plan-stage">
       <img class="saved-plan-image" alt="Saved floor plan" src="${floor.preview_image_url}">
-      <svg class="saved-plan-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Saved room overlays"></svg>
+      <svg class="saved-plan-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Editable saved room overlays"></svg>
     </div>
   `;
   outline.before(wrap);
-  arqisUpdateSavedPlanOverlay(rooms, activeRoomId);
-}
-
-function arqisUpdateSavedPlanOverlay(rooms, activeRoomId = "") {
-  const overlay = document.querySelector(".saved-plan-overlay");
-  if (!overlay) return;
-  overlay.replaceChildren();
-  rooms.forEach((room) => {
-    const points = arqisSavedRoomPolygonPoints(room);
-    if (!points) return;
-    const polygon = arqisSvgElement("polygon", {
-      points,
-      class: `saved-plan-room${room.id === activeRoomId ? " active" : ""}`
-    });
-    const labelPoint = arqisSavedRoomLabelPoint(room);
-    const label = arqisSvgElement("text", {
-      x: labelPoint.x.toFixed(2),
-      y: labelPoint.y.toFixed(2),
-      "text-anchor": "middle",
-      class: "saved-plan-label"
-    });
-    label.textContent = room.name;
-    overlay.append(polygon, label);
-  });
 }
 
 function arqisRenderProjectWithSavedFloor(project, floor) {
@@ -180,10 +239,11 @@ function arqisRenderProjectWithSavedFloor(project, floor) {
   const cadLargestArea = document.querySelector("#cadLargestArea");
   const cadTotalArea = document.querySelector("#cadTotalArea");
   const cadTotalFeet = document.querySelector("#cadTotalFeet");
-  const rooms = (floor?.rooms || []).map((room) => ({ ...room, points: room.polygon || [] }));
+  const rooms = (floor?.rooms || []).map(arqisNormaliseSavedRoom);
 
   tabs.replaceChildren();
   document.querySelector(".saved-plan-wrap")?.remove();
+  document.querySelector("#savedEditTools")?.remove();
 
   if (floor?.preview_image_url) {
     preview.innerHTML = `<img class="saved-plan-thumb" alt="Saved floor plan preview" src="${floor.preview_image_url}">`;
@@ -198,49 +258,30 @@ function arqisRenderProjectWithSavedFloor(project, floor) {
   }
 
   fileStatus.textContent = floor?.source_file_name ? `${floor.source_file_name} loaded from saved project` : `${project.name} loaded from saved project`;
-
-  function selectRoom(index) {
-    const room = rooms[index];
-    if (!room) return;
-    const area = arqisRoomArea(room);
-    document.querySelector("#selectedRoomName").textContent = room.name;
-    document.querySelector("#selectedRoomArea").textContent = Number.isFinite(area) ? `${area.toFixed(2)} m²` : "--";
-    document.querySelector("#selectedRoomFeet").textContent = Number.isFinite(area) ? `${(area * 10.7639).toFixed(2)} ft²` : "--";
-    document.querySelector("#roomTitle").textContent = room.name;
-    document.querySelectorAll("#roomTabs .room-tab").forEach((tab, tabIndex) => {
-      tab.classList.toggle("active", tabIndex === index);
-    });
-    if (Number.isFinite(room.length_m)) document.querySelector("#length").value = room.length_m;
-    if (Number.isFinite(room.width_m)) document.querySelector("#width").value = room.width_m;
-    if (Number.isFinite(room.height_m || room.ceiling_height_m)) document.querySelector("#height").value = room.height_m || room.ceiling_height_m;
-    arqisDrawLoadedRoom(room);
-    arqisUpdateSavedPlanOverlay(rooms, room.id);
-    if (typeof calculate === "function") calculate();
-  }
-
-  rooms.forEach((room, index) => {
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.className = `room-tab${index === 0 ? " active" : ""}`;
-    tab.textContent = room.name;
-    tab.addEventListener("click", () => selectRoom(index));
-    tabs.append(tab);
-  });
-
   const areas = rooms.map(arqisRoomArea).filter(Number.isFinite);
   const total = areas.reduce((sum, area) => sum + area, 0);
   cadStatus.textContent = floor?.preview_image_url ? "Saved floor plan loaded" : "Saved project loaded";
   cadMessage.textContent = floor?.preview_image_url
-    ? `${project.name} loaded with the saved floor plan and ${rooms.length} saved room${rooms.length === 1 ? "" : "s"}.`
+    ? `${project.name} reopened as an editable saved floor. Select a room, drag its white handles, add another room, then Save project again.`
     : `${project.name} loaded with ${rooms.length} saved room${rooms.length === 1 ? "" : "s"}. Save again with the PDF open to keep the plan image too.`;
   cadShapeCount.textContent = `${rooms.length}`;
   cadLargestArea.textContent = areas.length ? `${Math.max(...areas).toFixed(2)} m²` : "--";
   cadTotalArea.textContent = areas.length ? `${total.toFixed(2)} m²` : "--";
   cadTotalFeet.textContent = areas.length ? `${(total * 10.7639).toFixed(2)} ft²` : "--";
 
-  arqisRenderSavedPlan(floor, rooms, rooms[0]?.id || "");
-  if (rooms.length) {
-    selectRoom(0);
+  arqisRenderSavedPlan(floor);
+  if (floor?.preview_image_url) {
+    arqisActivateSavedFloorEditing(rooms);
+  } else if (rooms.length) {
+    rooms.forEach((room, index) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = `room-tab${index === 0 ? " active" : ""}`;
+      tab.textContent = room.name;
+      tab.addEventListener("click", () => arqisDrawLoadedRoom(room));
+      tabs.append(tab);
+    });
+    arqisDrawLoadedRoom(rooms[0]);
   } else {
     document.querySelector("#roomTitle").textContent = floor?.name || project.name;
     document.querySelector("#selectedRoomName").textContent = "No room selected";
