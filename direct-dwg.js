@@ -2,7 +2,6 @@ const directDwgFile = document.querySelector("#planFile");
 const directDwgFileStatus = document.querySelector("#fileStatus");
 const directDwgPreviewBody = document.querySelector("#planPreviewBody");
 const directDwgRoomTabs = document.querySelector("#roomTabs");
-const VERCEL_DWG_FILE_LIMIT = 3 * 1024 * 1024;
 const DIRECT_CONVERTER_URL = "https://arqis-converter.onrender.com/convert";
 let directFloorBrowser = null;
 let directActiveFloor = null;
@@ -24,7 +23,7 @@ function directDwgCard(file, lines) {
 function directDwgPdfCard(file, conversion) {
   if (!conversion?.previewPdfBase64) {
     directDwgCard(file, [
-      "Large DWG converted outside Vercel.",
+      "DWG converted outside Vercel.",
       conversion?.previewError || "LibreCAD did not return a PDF preview for this drawing."
     ]);
     return;
@@ -332,21 +331,21 @@ function directTextBase64(text) {
 
 function directDwgErrorMessage(error) {
   if (!error?.message || error.message === "Failed to fetch") {
-    return "The converter could not complete this large DWG yet. Arqis kept the file on the large-drawing route so we can inspect the converter result.";
+    return "The converter could not complete this DWG yet. Arqis kept the file on the converter route so we can inspect the result.";
   }
   return error.message;
 }
 
-async function convertLargeDwg(file) {
+async function convertDwg(file) {
   directCadEntities = [];
   directDwgFileStatus.textContent = `Sending ${file.name} to the DWG converter...`;
   directDwgCard(file, [
-    "Large DWG received.",
-    "Arqis is converting it outside the small website upload route."
+    "DWG received.",
+    "Arqis is converting it with LibreDWG and LibreCAD."
   ]);
   directDwgAnalysis(
-    "Large DWG conversion running",
-    "This CAD file is too large for the small Vercel analysis upload. Arqis is sending it directly to the DWG converter first."
+    "DWG conversion running",
+    "Arqis is sending this DWG to the converter first, then it will check the CAD geometry."
   );
 
   const conversionResponse = await fetch(`${DIRECT_CONVERTER_URL}?fileName=${encodeURIComponent(file.name)}`, {
@@ -356,7 +355,7 @@ async function convertLargeDwg(file) {
   });
   const conversion = await directJson(
     conversionResponse,
-    "The DWG converter did not return a usable CAD result for this large drawing."
+    "The DWG converter did not return a usable CAD result for this drawing."
   );
   if (!conversionResponse.ok || !conversion.ok || !conversion.dxfText) {
     throw new Error(conversion.message || "The DWG converter could not process this drawing yet.");
@@ -393,20 +392,20 @@ async function convertLargeDwg(file) {
 
 async function onLargeDwgChange(event) {
   const file = directDwgFile.files[0];
-  if (!file || directDwgExtension(file) !== "dwg" || file.size <= VERCEL_DWG_FILE_LIMIT) return;
+  if (!file || directDwgExtension(file) !== "dwg") return;
 
   event.stopImmediatePropagation();
 
   try {
-    await convertLargeDwg(file);
+    await convertDwg(file);
   } catch (error) {
     directDwgFileStatus.textContent = `${file.name} needs another converter pass`;
     directDwgCard(file, [
-      "The large DWG did not complete through the converter.",
-      "Arqis kept it on the large-drawing route so the converter result can be inspected."
+      "The DWG did not complete through the converter.",
+      "Arqis kept it on the converter route so the converter result can be inspected."
     ]);
     directDwgAnalysis(
-      "Large DWG conversion not complete",
+      "DWG conversion not complete",
       directDwgErrorMessage(error)
     );
   }
