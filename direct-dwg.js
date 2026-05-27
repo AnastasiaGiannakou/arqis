@@ -316,7 +316,7 @@ async function directJson(response, fallback) {
   try {
     return JSON.parse(text);
   } catch {
-    throw new Error(fallback);
+    throw new Error(`${fallback} Converter returned ${response.status}.`);
   }
 }
 
