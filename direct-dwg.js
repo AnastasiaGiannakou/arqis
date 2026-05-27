@@ -21,6 +21,30 @@ function directDwgCard(file, lines) {
   `;
 }
 
+function directDwgPdfCard(file, conversion) {
+  if (!conversion?.previewPdfBase64) {
+    directDwgCard(file, [
+      "Large DWG converted outside Vercel.",
+      conversion?.previewError || "LibreCAD did not return a PDF preview for this drawing."
+    ]);
+    return;
+  }
+
+  const pdfUrl = `data:application/pdf;base64,${conversion.previewPdfBase64}`;
+  directDwgPreviewBody.innerHTML = `
+    <div class="plan-file-card cad-pdf-preview-card">
+      <strong>${file.name}</strong>
+      <span>LibreCAD generated a CAD PDF preview.</span>
+      <iframe
+        title="${file.name} CAD PDF preview"
+        src="${pdfUrl}"
+        loading="lazy"
+        style="width:100%;height:min(520px,58vh);border:1px solid #d7ded8;border-radius:6px;background:#fff"
+      ></iframe>
+    </div>
+  `;
+}
+
 function directShapeBounds(shape) {
   const xs = shape.points.map((point) => point.x);
   const ys = shape.points.map((point) => point.y);
@@ -225,7 +249,7 @@ function directFloorOverview(floor, roomIndex = 0) {
   const caption = document.createElement("p");
   caption.className = "floor-plan-caption";
   caption.style.cssText = "color:#65736c;font-size:12px;font-weight:800;text-transform:uppercase";
-  caption.textContent = `${floor.name} generated plan`;
+  caption.textContent = `${floor.name} overview`;
   directDwgPreviewBody.replaceChildren(svg, caption);
 }
 
@@ -358,10 +382,7 @@ async function convertLargeDwg(file) {
   }
 
   directDwgFileStatus.textContent = `${file.name} converted and checked`;
-  directDwgCard(file, [
-    "Large DWG converted outside Vercel.",
-    "Arqis is checking the extracted CAD geometry for floors and rooms."
-  ]);
+  directDwgPdfCard(file, conversion);
   directDwgAnalysis(
     analysis.status || "Converted CAD geometry checked",
     analysis.message || "Arqis checked the converted CAD geometry.",
