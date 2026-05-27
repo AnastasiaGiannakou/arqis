@@ -1,3 +1,5 @@
+let arqisSavedFloorZoom = 1;
+
 function arqisEditFixNormaliseRoom(room) {
   const points = arqisRoomPolygon(room).map((point) => ({
     x: Number(point.x),
@@ -11,6 +13,84 @@ function arqisEditFixNormaliseRoom(room) {
     points,
     ...bounds
   };
+}
+
+function arqisSetSavedFloorZoom(zoom) {
+  arqisSavedFloorZoom = Math.max(0.75, Math.min(3, Number(zoom.toFixed(2))));
+  const stage = document.querySelector(".saved-plan-stage");
+  if (stage) stage.style.width = `${Math.round(arqisSavedFloorZoom * 100)}%`;
+  const label = document.querySelector("#savedZoomLabel");
+  if (label) label.textContent = `${Math.round(arqisSavedFloorZoom * 100)}%`;
+  if (typeof lassoDrawDraft === "function") lassoDrawDraft();
+  if (typeof lassoDrawRooms === "function") lassoDrawRooms();
+}
+
+function arqisEnsureSavedEditTools() {
+  const existing = document.querySelector("#savedEditTools");
+  if (existing) existing.remove();
+
+  const tabs = document.querySelector("#roomTabs");
+  if (!tabs) return;
+  const tools = document.createElement("div");
+  tools.className = "saved-edit-tools";
+  tools.id = "savedEditTools";
+  tools.innerHTML = `
+    <button class="pdf-tool-btn" id="savedMarkRoomBtn" type="button">Mark room</button>
+    <button class="pdf-tool-btn" id="savedCompleteOutlineBtn" type="button">Complete outline</button>
+    <button class="pdf-tool-btn" id="savedUndoPointBtn" type="button">Undo point</button>
+    <button class="pdf-tool-btn" id="savedZoomOutBtn" type="button">Zoom out</button>
+    <span class="pdf-zoom-label" id="savedZoomLabel">100%</span>
+    <button class="pdf-tool-btn" id="savedZoomInBtn" type="button">Zoom in</button>
+    <button class="pdf-tool-btn" id="savedZoomFitBtn" type="button">Fit</button>
+    <button class="pdf-tool-btn" id="savedClearRoomsBtn" type="button">Clear all rooms</button>
+  `;
+  tabs.before(tools);
+
+  tools.querySelector("#savedMarkRoomBtn").addEventListener("click", () => {
+    const overlay = document.querySelector(".saved-plan-overlay");
+    const active = !overlay?.classList.contains("marking");
+    overlay?.classList.toggle("marking", active);
+    tools.querySelector("#savedMarkRoomBtn").classList.toggle("active", active);
+    document.querySelector("#cadStatus").textContent = active ? "Room marking active" : "Saved floor plan loaded";
+    document.querySelector("#cadMessage").textContent = active
+      ? "Click around the room boundary, then choose Complete outline. Drag white handles to amend a selected room."
+      : "Select a room to edit it, or use Mark room to add another room.";
+  });
+
+  tools.querySelector("#savedCompleteOutlineBtn").addEventListener("click", () => {
+    if (typeof lassoFinishRoom === "function") lassoFinishRoom();
+    document.querySelector(".saved-plan-overlay")?.classList.remove("marking");
+    tools.querySelector("#savedMarkRoomBtn")?.classList.remove("active");
+  });
+
+  tools.querySelector("#savedUndoPointBtn").addEventListener("click", () => {
+    if (typeof lassoState !== "undefined") {
+      lassoState.points.pop();
+      if (typeof lassoDrawDraft === "function") lassoDrawDraft();
+    }
+  });
+
+  tools.querySelector("#savedZoomOutBtn").addEventListener("click", () => arqisSetSavedFloorZoom(arqisSavedFloorZoom - 0.25));
+  tools.querySelector("#savedZoomInBtn").addEventListener("click", () => arqisSetSavedFloorZoom(arqisSavedFloorZoom + 0.25));
+  tools.querySelector("#savedZoomFitBtn").addEventListener("click", () => arqisSetSavedFloorZoom(1));
+
+  tools.querySelector("#savedClearRoomsBtn").addEventListener("click", () => {
+    if (typeof lassoState === "undefined") return;
+    if (lassoState.rooms.length && !window.confirm("Clear all rooms on this saved floor?")) return;
+    lassoState.rooms = [];
+    lassoState.activeRoomId = "";
+    lassoState.points = [];
+    if (typeof lassoSave === "function") lassoSave();
+    if (typeof lassoDrawDraft === "function") lassoDrawDraft();
+    if (typeof lassoDrawRooms === "function") lassoDrawRooms();
+    if (typeof lassoRenderTabs === "function") lassoRenderTabs();
+    document.querySelector("#cadShapeCount").textContent = "0";
+    document.querySelector("#cadLargestArea").textContent = "--";
+    document.querySelector("#cadTotalArea").textContent = "--";
+    document.querySelector("#cadTotalFeet").textContent = "--";
+  });
+
+  arqisSetSavedFloorZoom(arqisSavedFloorZoom);
 }
 
 function arqisInstallRoomsIntoLasso(restoredRooms) {
@@ -32,7 +112,8 @@ function arqisActivateSavedFloorEditing(rooms) {
     .map(arqisEditFixNormaliseRoom)
     .filter((room) => room.points.length >= 3);
 
-  if (typeof arqisEnsureSavedEditTools === "function") arqisEnsureSavedEditTools();
+  arqisSavedFloorZoom = 1;
+  arqisEnsureSavedEditTools();
 
   const overlay = document.querySelector(".saved-plan-overlay");
   if (overlay) {
