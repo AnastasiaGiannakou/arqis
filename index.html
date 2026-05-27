@@ -29,7 +29,7 @@
         <label class="upload-box" for="planFile">
           <strong>Upload CAD plan</strong>
           <small>Files now go to the backend. DXF room outlines are measured; DWG conversion hook is ready.</small>
-          <input id="planFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.dxf,.dwg">
+          <input id="planFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.dxf,.dwg" multiple>
         </label>
         <button class="secondary" id="sampleDxfBtn" type="button">Try sample DXF rooms</button>
         <label>
@@ -161,6 +161,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="script.js"></script>
   <script src="pdf-plan.js?v=20260525-3"></script>
+  <script src="pdf-set.js?v=20260527-1"></script>
   <script src="pdf-fixes.js?v=20260526-1"></script>
   <script src="pdf-lasso.js?v=20260526-3"></script>
   <script src="direct-dwg.js?v=20260527-5"></script>
