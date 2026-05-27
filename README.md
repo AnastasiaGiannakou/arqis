@@ -1,7 +1,7 @@
 [README.md](https://github.com/user-attachments/files/28104943/README.md)
-# Arqis Prototype
+# ARQIS Prototype
 
-Arqis is an early bathroom tiling estimate prototype. It lets a user upload a plan reference, enter room dimensions, choose tiling coverage, select a sample product, and generate a quote-style estimate with a simple 3D preview.
+ARQIS is an early bathroom tiling estimate prototype. It lets a user upload a plan reference, enter room dimensions, choose tiling coverage, select a sample product, and generate a quote-style estimate with a simple 3D preview.
 
 ## Open locally
 
