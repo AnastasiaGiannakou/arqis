@@ -124,8 +124,51 @@ function lassoRoomArea(room) {
   return lassoNumber("#length", 3.2) * lassoNumber("#width", 2.4) * shapeRatio;
 }
 
+function lassoRoomPerimeter(room) {
+  const box = lassoBounds(room.points);
+  const scaleX = lassoNumber("#length", 3.2) / Math.max(box.width, 0.001);
+  const scaleY = lassoNumber("#width", 2.4) / Math.max(box.height, 0.001);
+  return room.points.reduce((sum, point, index) => {
+    const next = room.points[(index + 1) % room.points.length];
+    return sum + Math.hypot((next.x - point.x) * scaleX, (next.y - point.y) * scaleY);
+  }, 0);
+}
+
 function lassoFeet(metres) {
   return metres * 10.7639;
+}
+
+function lassoInputNumber(selector, fallback = 0) {
+  const value = Number(document.querySelector(selector)?.value);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function lassoActiveTileMode() {
+  return document.querySelector("input[name='tileMode']:checked")?.value || "full";
+}
+
+function lassoTileHeight(roomHeight) {
+  const mode = lassoActiveTileMode();
+  if (mode === "half") return Math.min(1.2, roomHeight);
+  if (mode === "custom") return Math.min(lassoInputNumber("#tileHeight", roomHeight), roomHeight);
+  return roomHeight;
+}
+
+function lassoProductDetails() {
+  const [price, boxCoverage, name] = (document.querySelector("#product")?.value || "0|1|Tile").split("|");
+  return {
+    price: Number(price) || 0,
+    boxCoverage: Number(boxCoverage) || 1,
+    name: name || "Tile"
+  };
+}
+
+function lassoMoney(value) {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    maximumFractionDigits: 0
+  }).format(value || 0);
 }
 
 function lassoOverlayPoint(event) {
@@ -304,14 +347,57 @@ function lassoDrawCleanRoom(room) {
 function lassoUpdateTotals(room) {
   const area = lassoRoomArea(room);
   const feet = lassoFeet(area);
+  const roomHeight = lassoInputNumber("#height", 2.4);
+  const tileHeight = lassoTileHeight(roomHeight);
+  const waste = lassoInputNumber("#waste", 10) / 100;
+  const openings = (lassoInputNumber("#doors", 0) * lassoInputNumber("#doorArea", 0))
+    + (lassoInputNumber("#windows", 0) * lassoInputNumber("#windowArea", 0));
+  const includeFloor = Boolean(document.querySelector("#tileFloor")?.checked);
+  const includeWalls = Boolean(document.querySelector("#tileWalls")?.checked);
+  const wallArea = includeWalls ? Math.max(0, (lassoRoomPerimeter(room) * tileHeight) - openings) : 0;
+  const selectedFloorArea = includeFloor ? area : 0;
+  const totalArea = selectedFloorArea + wallArea;
+  const totalWithWaste = totalArea * (1 + waste);
+  const product = lassoProductDetails();
+  const boxes = product.boxCoverage > 0 ? Math.ceil(totalWithWaste / product.boxCoverage) : 0;
+  const materialCost = totalWithWaste * product.price;
+  const labourCost = totalArea * lassoInputNumber("#labour", 0);
+  const extras = lassoInputNumber("#extras", 0);
   document.querySelector("#selectedRoomArea").textContent = `${area.toFixed(2)} m²`;
   document.querySelector("#selectedRoomFeet").textContent = `${feet.toFixed(2)} ft²`;
   document.querySelector("#floorArea").textContent = `${area.toFixed(2)} m²`;
+  document.querySelector("#wallArea").textContent = `${wallArea.toFixed(2)} m²`;
+  document.querySelector("#totalArea").textContent = `${totalWithWaste.toFixed(2)} m²`;
+  document.querySelector("#boxes").textContent = `${boxes}`;
+  document.querySelector("#materialCost").textContent = lassoMoney(materialCost);
+  document.querySelector("#labourCost").textContent = lassoMoney(labourCost);
+  document.querySelector("#extrasCost").textContent = lassoMoney(extras);
+  document.querySelector("#totalCost").textContent = lassoMoney(materialCost + labourCost + extras);
   document.querySelector("#cadShapeCount").textContent = `${lassoState.rooms.length}`;
   document.querySelector("#cadLargestArea").textContent = `${Math.max(...lassoState.rooms.map(lassoRoomArea), 0).toFixed(2)} m²`;
   const total = lassoState.rooms.reduce((sum, item) => sum + lassoRoomArea(item), 0);
   document.querySelector("#cadTotalArea").textContent = `${total.toFixed(2)} m²`;
   document.querySelector("#cadTotalFeet").textContent = `${lassoFeet(total).toFixed(2)} ft²`;
+
+  const modeText = lassoActiveTileMode() === "full"
+    ? "floor-to-ceiling"
+    : lassoActiveTileMode() === "half"
+      ? "half-height"
+      : `${tileHeight.toFixed(2)}m high`;
+  document.querySelector("#summaryText").textContent =
+    `${product.name} selected for ${room.name}. The estimate uses ${modeText} wall tiling at ${roomHeight.toFixed(2)}m ceiling height, ${Math.round(waste * 100)}% waste, ${boxes} boxes, materials, labour, and listed extras.`;
+  document.querySelector("#tileHeight").disabled = lassoActiveTileMode() !== "custom";
+}
+
+function lassoRefreshSelectedRoomEstimate() {
+  const room = lassoState.rooms.find((item) => item.id === lassoState.activeRoomId);
+  if (!room) return;
+  room.height_m = lassoInputNumber("#height", 2.4);
+  room.ceiling_height_m = room.height_m;
+  room.tile_height_m = lassoTileHeight(room.height_m);
+  lassoSave();
+  lassoDrawCleanRoom(room);
+  lassoUpdateTotals(room);
 }
 
 function lassoSelectRoom(roomId) {
@@ -437,12 +523,28 @@ document.addEventListener("click", (event) => {
   }
 }, true);
 
-["#length", "#width"].forEach((selector) => {
+[
+  "#length",
+  "#width",
+  "#height",
+  "#tileHeight",
+  "#waste",
+  "#doors",
+  "#doorArea",
+  "#windows",
+  "#windowArea",
+  "#labour",
+  "#extras",
+  "#product",
+  "#tileFloor",
+  "#tileWalls",
+  "input[name='tileMode']"
+].forEach((selector) => {
   document.querySelector(selector)?.addEventListener("input", () => {
-    const room = lassoState.rooms.find((item) => item.id === lassoState.activeRoomId);
-    if (!room) return;
-    lassoDrawCleanRoom(room);
-    lassoUpdateTotals(room);
+    lassoRefreshSelectedRoomEstimate();
+  });
+  document.querySelector(selector)?.addEventListener("change", () => {
+    lassoRefreshSelectedRoomEstimate();
   });
 });
 
