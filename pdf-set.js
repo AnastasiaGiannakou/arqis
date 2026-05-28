@@ -13,6 +13,36 @@ function pdfSetIsPdf(file) {
   return file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
 }
 
+function pdfSetFileKey(file) {
+  return `${file.name}:${file.size}:${file.lastModified || 0}`;
+}
+
+function pdfSetSortFiles(files) {
+  return [...files].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function pdfSetMergeFiles(nextFiles) {
+  const filesByKey = new Map(pdfSetState.files.map((file) => [pdfSetFileKey(file), file]));
+  let firstAddedKey = "";
+
+  nextFiles.forEach((file) => {
+    const key = pdfSetFileKey(file);
+    if (!filesByKey.has(key)) {
+      if (!firstAddedKey) firstAddedKey = key;
+      filesByKey.set(key, file);
+    }
+  });
+
+  pdfSetState.files = pdfSetSortFiles([...filesByKey.values()]);
+
+  if (firstAddedKey) {
+    const nextIndex = pdfSetState.files.findIndex((file) => pdfSetFileKey(file) === firstAddedKey);
+    if (nextIndex >= 0) pdfSetState.activeIndex = nextIndex;
+  }
+
+  return Boolean(firstAddedKey);
+}
+
 function pdfSetFloorLabel(file, index) {
   const name = file.name.toLowerCase();
   if (name.includes("a002")) return "Ground floor";
@@ -29,7 +59,7 @@ function pdfSetRemoveTabs() {
 }
 
 function pdfSetEnsureTabs() {
-  if (!pdfSetRoomTabs || pdfSetState.files.length < 2) return;
+  if (!pdfSetRoomTabs || pdfSetState.files.length < 1) return;
   if (!pdfSetState.tabs) {
     pdfSetState.tabs = document.createElement("div");
     pdfSetState.tabs.className = "room-tabs pdf-set-floor-tabs";
@@ -60,7 +90,8 @@ async function pdfSetOpenFloor(index) {
     await loadPdfPlan(pdfSetState.files[index]);
     pdfSetEnsureTabs();
     if (pdfSetFileStatus) {
-      pdfSetFileStatus.textContent = `${pdfSetFloorLabel(pdfSetState.files[index], index)} loaded from ${pdfSetState.files.length} PDF floor plans`;
+      const countLabel = pdfSetState.files.length === 1 ? "1 PDF floor plan" : `${pdfSetState.files.length} PDF floor plans`;
+      pdfSetFileStatus.textContent = `${pdfSetFloorLabel(pdfSetState.files[index], index)} loaded from ${countLabel}`;
     }
   } finally {
     pdfSetState.opening = false;
@@ -69,26 +100,38 @@ async function pdfSetOpenFloor(index) {
 
 function pdfSetHandleChange(event) {
   const files = [...(event.target?.files || [])];
+  if (!files.length) return;
+
   const pdfFiles = files.filter(pdfSetIsPdf);
-  if (pdfFiles.length < 2 || pdfFiles.length !== files.length) {
-    pdfSetState.files = [];
-    pdfSetState.activeIndex = 0;
-    pdfSetRemoveTabs();
-    return;
-  }
+  if (!pdfFiles.length || pdfFiles.length !== files.length) return;
 
   event.preventDefault();
   event.stopImmediatePropagation();
   event.stopPropagation();
 
-  pdfSetState.files = pdfFiles.sort((left, right) => left.name.localeCompare(right.name));
-  pdfSetState.activeIndex = 0;
-  pdfSetOpenFloor(0).catch((error) => {
+  const previousCount = pdfSetState.files.length;
+  const added = pdfSetMergeFiles(pdfFiles);
+
+  if (!added && pdfFiles[0]) {
+    const selectedKey = pdfSetFileKey(pdfFiles[0]);
+    const selectedIndex = pdfSetState.files.findIndex((file) => pdfSetFileKey(file) === selectedKey);
+    if (selectedIndex >= 0) pdfSetState.activeIndex = selectedIndex;
+  }
+
+  pdfSetOpenFloor(pdfSetState.activeIndex).then(() => {
+    if (pdfSetFileStatus && added) {
+      const addedCount = pdfSetState.files.length - previousCount;
+      const addedLabel = addedCount === 1 ? "1 PDF floor" : `${addedCount} PDF floors`;
+      pdfSetFileStatus.textContent = `Added ${addedLabel}. ${pdfSetState.files.length} floors in this project.`;
+    }
+  }).catch((error) => {
     pdfSetRemoveTabs();
     if (pdfSetFileStatus) pdfSetFileStatus.textContent = "The PDF floor set could not be opened";
     if (typeof setPdfMetrics === "function") {
       setPdfMetrics("PDF floor set failed", error.message || "The PDF floor set could not be rendered yet.");
     }
+  }).finally(() => {
+    if (pdfSetInput) pdfSetInput.value = "";
   });
 }
 
@@ -101,3 +144,5 @@ document.querySelector("#clearPlanBtn")?.addEventListener("click", () => {
   pdfSetState.activeIndex = 0;
   pdfSetRemoveTabs();
 }, true);
+
+window.arqisPdfSet = pdfSetState;
