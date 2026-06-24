@@ -11,7 +11,92 @@
     body.arqis-workspace-v2 .cad-analysis,
     body.arqis-workspace-v2 .results,
     body.arqis-workspace-v2 .quote {
-      max-width: 1320px;
+      max-width: 1120px;
+    }
+
+    body.entered.arqis-workspace-v2 .app {
+      grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+    }
+
+    body.arqis-workspace-v2 .controls {
+      gap: 10px;
+      padding: 14px;
+    }
+
+    body.arqis-workspace-v2 .brand {
+      gap: 10px;
+      margin-bottom: 2px;
+    }
+
+    body.arqis-workspace-v2 .brand span {
+      width: 34px;
+      height: 34px;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+
+    body.arqis-workspace-v2 .brand h1 {
+      font-size: 20px;
+    }
+
+    body.arqis-workspace-v2 .brand p {
+      font-size: 13px;
+      line-height: 1.2;
+    }
+
+    body.arqis-workspace-v2 .panel {
+      gap: 8px;
+      padding-bottom: 10px;
+    }
+
+    body.arqis-workspace-v2 .panel h2 {
+      font-size: 13px;
+    }
+
+    body.arqis-workspace-v2 label {
+      gap: 4px;
+      font-size: 12px;
+    }
+
+    body.arqis-workspace-v2 input,
+    body.arqis-workspace-v2 select {
+      min-height: 34px;
+      padding: 6px 8px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+
+    body.arqis-workspace-v2 .upload-box {
+      min-height: 76px;
+      padding: 10px;
+    }
+
+    body.arqis-workspace-v2 .upload-box small,
+    body.arqis-workspace-v2 .status {
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    body.arqis-workspace-v2 .secondary,
+    body.arqis-workspace-v2 #printBtn,
+    body.arqis-workspace-v2 #clearPlanBtn {
+      min-height: 32px;
+      font-size: 12px;
+    }
+
+    body.arqis-workspace-v2 .stage {
+      gap: 10px;
+      padding: 18px;
+    }
+
+    body.arqis-workspace-v2 .topbar h2 {
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    body.arqis-workspace-v2 .eyebrow {
+      margin-bottom: 2px;
+      font-size: 10px;
     }
 
     body.arqis-workspace-v2 .preview-grid {
@@ -23,15 +108,58 @@
     }
 
     body.arqis-workspace-v2 .room-browser {
-      gap: 10px;
+      gap: 8px;
     }
 
     body.arqis-workspace-v2 .room-outline-card {
-      padding: 12px;
+      padding: 8px;
     }
 
     body.arqis-workspace-v2 .pdf-main-wrap {
-      max-height: min(78vh, 860px);
+      max-height: min(58vh, 600px);
+    }
+
+    body.arqis-workspace-v2 .pdf-main-frame {
+      min-height: min(520px, 54vh);
+    }
+
+    body.arqis-workspace-v2 .pdf-tools,
+    body.arqis-workspace-v2 #roomTabs,
+    body.arqis-workspace-v2 .pdf-set-floor-tabs {
+      gap: 5px;
+    }
+
+    body.arqis-workspace-v2 .pdf-tool-btn,
+    body.arqis-workspace-v2 .pdf-zoom-label,
+    body.arqis-workspace-v2 .room-tab {
+      min-height: 30px;
+      padding: 0 9px;
+      border-radius: 5px;
+      font-size: 12px;
+    }
+
+    body.arqis-workspace-v2 .pdf-zoom-label {
+      min-width: 52px;
+    }
+
+    body.arqis-workspace-v2 .pdf-room-label,
+    body.arqis-workspace-v2 .lasso-room-label {
+      font-size: 1.1px;
+    }
+
+    body.arqis-workspace-v2 .room-size-strip article,
+    body.arqis-workspace-v2 .metrics article,
+    body.arqis-workspace-v2 .results article {
+      padding: 10px;
+    }
+
+    body.arqis-workspace-v2 .room-size-strip strong,
+    body.arqis-workspace-v2 .metrics strong {
+      font-size: 15px;
+    }
+
+    body.arqis-workspace-v2 .results strong {
+      font-size: 18px;
     }
 
     body.arqis-workspace-v2 #roomTabs .arqis-hidden-room-tab {
@@ -40,8 +168,8 @@
 
     .arqis-room-list-panel {
       display: grid;
-      gap: 8px;
-      padding: 10px;
+      gap: 6px;
+      padding: 8px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.72);
@@ -53,7 +181,7 @@
       justify-content: space-between;
       gap: 10px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 10px;
       font-weight: 850;
       text-transform: uppercase;
     }
@@ -61,20 +189,21 @@
     .arqis-room-list {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
-      min-height: 38px;
+      gap: 6px;
+      min-height: 30px;
     }
 
     .arqis-room-pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      min-height: 38px;
-      padding: 0 8px 0 12px;
+      gap: 5px;
+      min-height: 30px;
+      padding: 0 5px 0 8px;
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--paper);
       color: var(--ink);
+      font-size: 12px;
       font-weight: 850;
     }
 
@@ -92,13 +221,13 @@
     }
 
     .arqis-room-pill button {
-      min-width: 30px;
-      min-height: 28px;
+      min-width: 24px;
+      min-height: 24px;
       border: 1px solid rgba(24, 32, 29, 0.18);
       border-radius: 5px;
       background: rgba(255, 255, 255, 0.9);
       color: var(--ink);
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 850;
       line-height: 1;
     }
