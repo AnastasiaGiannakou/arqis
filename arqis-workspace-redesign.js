@@ -3,6 +3,7 @@
   const ROOM_LIST_ID = "arqisRoomListPanel";
   let refreshQueued = false;
   let lastRoomSignature = "";
+  let lastPdfSurface = null;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -12,6 +13,8 @@
     body.arqis-workspace-v2 .results,
     body.arqis-workspace-v2 .quote {
       max-width: 1120px;
+      margin-left: 0;
+      margin-right: auto;
     }
 
     body.entered.arqis-workspace-v2 .app {
@@ -116,11 +119,12 @@
     }
 
     body.arqis-workspace-v2 .pdf-main-wrap {
-      max-height: min(58vh, 600px);
+      max-width: min(900px, 100%);
+      max-height: min(48vh, 520px);
     }
 
     body.arqis-workspace-v2 .pdf-main-frame {
-      min-height: min(520px, 54vh);
+      min-height: min(440px, 46vh);
     }
 
     body.arqis-workspace-v2 .pdf-tools,
@@ -258,6 +262,34 @@
     return fallback;
   }
 
+  function globalFunction(name) {
+    try {
+      if (name === "lassoSelectRoom" && typeof lassoSelectRoom === "function") return lassoSelectRoom;
+      if (name === "lassoDeleteRoom" && typeof lassoDeleteRoom === "function") return lassoDeleteRoom;
+      if (name === "lassoSave" && typeof lassoSave === "function") return lassoSave;
+      if (name === "lassoRenderTabs" && typeof lassoRenderTabs === "function") return lassoRenderTabs;
+      if (name === "lassoDrawRooms" && typeof lassoDrawRooms === "function") return lassoDrawRooms;
+      if (name === "selectPdfRoom" && typeof selectPdfRoom === "function") return selectPdfRoom;
+      if (name === "deletePdfRoom" && typeof deletePdfRoom === "function") return deletePdfRoom;
+      if (name === "applyPdfZoom" && typeof applyPdfZoom === "function") return applyPdfZoom;
+    } catch {
+      return null;
+    }
+    return typeof window[name] === "function" ? window[name] : null;
+  }
+
+  function setGlobalValue(name, value) {
+    try {
+      if (name === "pdfZoom" && typeof pdfZoom !== "undefined") {
+        pdfZoom = value;
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    return false;
+  }
+
   function activePage() {
     const page = Number(globalValue("activePdfPage", 1));
     return Number.isFinite(page) && page > 0 ? page : 1;
@@ -327,10 +359,12 @@
   }
 
   function selectRoom(room) {
-    if (room.source === "lasso" && typeof window.lassoSelectRoom === "function") {
-      window.lassoSelectRoom(room.id);
-    } else if (room.source === "pdf" && typeof window.selectPdfRoom === "function") {
-      window.selectPdfRoom(room.id);
+    const lassoSelect = globalFunction("lassoSelectRoom");
+    const pdfSelect = globalFunction("selectPdfRoom");
+    if (room.source === "lasso" && lassoSelect) {
+      lassoSelect(room.id);
+    } else if (room.source === "pdf" && pdfSelect) {
+      pdfSelect(room.id);
     } else {
       document.querySelector("#selectedRoomName").textContent = room.name;
       document.querySelector("#roomTitle").textContent = room.name;
@@ -343,21 +377,58 @@
     if (!next || !next.trim()) return;
     room.raw.name = next.trim();
     const state = window.arqisLassoState || window.lassoState || globalValue("lassoState", null);
-    if (room.source === "lasso" && typeof window.lassoSave === "function") window.lassoSave();
-    if (room.source === "lasso" && typeof window.lassoRenderTabs === "function") window.lassoRenderTabs();
-    if (room.source === "lasso" && state?.activeRoomId === room.id && typeof window.lassoSelectRoom === "function") {
-      window.lassoSelectRoom(room.id);
+    const lassoSave = globalFunction("lassoSave");
+    const lassoRenderTabs = globalFunction("lassoRenderTabs");
+    const lassoSelect = globalFunction("lassoSelectRoom");
+    if (room.source === "lasso" && lassoSave) lassoSave();
+    if (room.source === "lasso" && lassoRenderTabs) lassoRenderTabs();
+    if (room.source === "lasso" && state?.activeRoomId === room.id && lassoSelect) {
+      lassoSelect(room.id);
     }
     queueRefresh();
   }
 
   function deleteRoom(room) {
-    if (room.source === "lasso" && typeof window.lassoDeleteRoom === "function") {
-      window.lassoDeleteRoom(room.id);
-    } else if (room.source === "pdf" && typeof window.deletePdfRoom === "function") {
-      window.deletePdfRoom(room.id);
+    const lassoDelete = globalFunction("lassoDeleteRoom");
+    const pdfDelete = globalFunction("deletePdfRoom");
+    if (room.source === "lasso" && lassoDelete) {
+      lassoDelete(room.id);
+    } else if (room.source === "pdf" && pdfDelete) {
+      pdfDelete(room.id);
     }
     queueRefresh();
+  }
+
+  function syncActiveRoom(rooms) {
+    if (!rooms.length) return;
+    const title = document.querySelector("#roomTitle")?.textContent?.trim() || "";
+    const selectedName = document.querySelector("#selectedRoomName")?.textContent?.trim() || "";
+    const knownNames = new Set(rooms.map((room) => room.name));
+    const hasActive = rooms.some((room) => room.active);
+    if (hasActive && (knownNames.has(title) || knownNames.has(selectedName))) return;
+
+    const firstRoom = rooms[0];
+    const state = window.arqisLassoState || window.lassoState || globalValue("lassoState", null);
+    if (firstRoom.source === "lasso" && state) state.activeRoomId = firstRoom.id;
+
+    const lassoDrawRooms = globalFunction("lassoDrawRooms");
+    if (firstRoom.source === "lasso" && lassoDrawRooms) lassoDrawRooms();
+    selectRoom(firstRoom);
+  }
+
+  function compactPdfView() {
+    const surface = document.querySelector(".pdf-zoom-surface");
+    if (!surface || surface === lastPdfSurface) return;
+    lastPdfSurface = surface;
+    setGlobalValue("pdfZoom", 0.55);
+    const applyPdfZoom = globalFunction("applyPdfZoom");
+    if (applyPdfZoom) {
+      applyPdfZoom();
+    } else {
+      surface.style.width = "55%";
+      const label = document.querySelector("#pdfZoomLabel");
+      if (label) label.textContent = "55%";
+    }
   }
 
   function renderRoomList() {
@@ -368,6 +439,8 @@
     tidyLegacyTabs();
 
     const rooms = currentRooms();
+    compactPdfView();
+    syncActiveRoom(rooms);
     const signature = rooms
       .map((room) => `${room.source}:${room.id}:${room.name}:${room.active ? "1" : "0"}`)
       .join("|");
