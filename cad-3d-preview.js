@@ -53,6 +53,38 @@
       font-weight: 700;
       line-height: 1.45;
     }
+
+    .arqis-3d-measurements {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .arqis-3d-measurements article {
+      display: grid;
+      gap: 3px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--paper);
+    }
+
+    .arqis-3d-measurements span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .arqis-3d-measurements strong {
+      font-size: 15px;
+    }
+
+    @media (max-width: 720px) {
+      .arqis-3d-measurements {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
   `;
   document.head.append(style);
 
@@ -191,10 +223,63 @@
     return points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
   }
 
-  function wallLength(points, index) {
-    const current = points[index];
-    const next = points[(index + 1) % points.length];
-    return Math.hypot(next.x - current.x, next.y - current.y);
+  function roomPerimeter(points) {
+    return points.reduce((sum, point, index) => {
+      const next = points[(index + 1) % points.length];
+      return sum + Math.hypot(next.x - point.x, next.y - point.y);
+    }, 0);
+  }
+
+  function label(svg, text, x, y, options = {}) {
+    const node = el("text", {
+      x,
+      y,
+      "text-anchor": options.anchor || "middle",
+      fill: options.fill || "#164c3a",
+      "font-size": options.size || "12",
+      "font-weight": "850",
+      "paint-order": "stroke",
+      stroke: "white",
+      "stroke-width": options.strokeWidth || "4"
+    });
+    node.textContent = text;
+    svg.append(node);
+    return node;
+  }
+
+  function guideLine(svg, start, end, text, textOffset = { x: 0, y: 0 }) {
+    svg.append(el("line", {
+      x1: start.x,
+      y1: start.y,
+      x2: end.x,
+      y2: end.y,
+      stroke: "#b85f38",
+      "stroke-width": "1.4",
+      "stroke-dasharray": "5 4"
+    }));
+    label(
+      svg,
+      text,
+      (start.x + end.x) / 2 + textOffset.x,
+      (start.y + end.y) / 2 + textOffset.y,
+      { fill: "#164c3a", size: "12" }
+    );
+  }
+
+  function updateMeasurementStrip(room, points, height, floorArea) {
+    const strip = document.querySelector("#arqis3dMeasurements");
+    if (!strip) return;
+    const length = Math.max(...points.map((point) => point.x)) - Math.min(...points.map((point) => point.x));
+    const width = Math.max(...points.map((point) => point.y)) - Math.min(...points.map((point) => point.y));
+    const perimeter = roomPerimeter(points);
+    strip.innerHTML = `
+      <article><span>Length</span><strong>${length.toFixed(2)} m</strong></article>
+      <article><span>Width</span><strong>${width.toFixed(2)} m</strong></article>
+      <article><span>Height</span><strong>${height.toFixed(2)} m</strong></article>
+      <article><span>Perimeter</span><strong>${perimeter.toFixed(2)} m</strong></article>
+    `;
+    strip.dataset.area = floorArea.toFixed(2);
+    strip.dataset.room = room.name || "Selected room";
   }
 
   function draw3d() {
@@ -209,6 +294,7 @@
     const floorArea = polygonArea(points);
     const topPoints = points.map((point) => renderPoint({ ...point, z: height }));
     const bottomPoints = points.map((point) => renderPoint({ ...point, z: 0 }));
+    const pointBounds = bounds(points);
 
     svg.replaceChildren();
 
@@ -225,13 +311,14 @@
     }).sort((a, b) => a.averageY - b.averageY);
 
     walls.forEach((wall, index) => {
-      svg.append(el("polygon", {
+      const face = el("polygon", {
         points: pointString(wall.face),
         fill: index % 2 ? "rgba(29,107,79,0.18)" : "rgba(29,107,79,0.26)",
         stroke: "#164c3a",
         "stroke-width": "1.8",
         "stroke-linejoin": "round"
-      }));
+      });
+      svg.append(face);
     });
 
     svg.append(el("polygon", {
@@ -250,54 +337,22 @@
       "stroke-linejoin": "round"
     }));
 
-    points.forEach((point, index) => {
-      const next = points[(index + 1) % points.length];
-      const metres = wallLength(points, index);
-      if (metres < 0.2) return;
-      const midpoint = renderPoint({ x: (point.x + next.x) / 2, y: (point.y + next.y) / 2, z: height + 0.05 });
-      const label = el("text", {
-        x: midpoint.x,
-        y: midpoint.y - 6,
-        "text-anchor": "middle",
-        fill: "#164c3a",
-        "font-size": "12",
-        "font-weight": "800",
-        "paint-order": "stroke",
-        stroke: "white",
-        "stroke-width": "3"
-      });
-      label.textContent = `${metres.toFixed(2)} m`;
-      svg.append(label);
-    });
+    const lengthStart = renderPoint({ x: pointBounds.minX, y: pointBounds.minY, z: 0 });
+    const lengthEnd = renderPoint({ x: pointBounds.maxX, y: pointBounds.minY, z: 0 });
+    const widthStart = renderPoint({ x: pointBounds.maxX, y: pointBounds.minY, z: 0 });
+    const widthEnd = renderPoint({ x: pointBounds.maxX, y: pointBounds.maxY, z: 0 });
+    const heightStart = renderPoint({ x: pointBounds.maxX, y: pointBounds.maxY, z: 0 });
+    const heightEnd = renderPoint({ x: pointBounds.maxX, y: pointBounds.maxY, z: height });
+    guideLine(svg, lengthStart, lengthEnd, `${pointBounds.width.toFixed(2)} m`, { y: 18 });
+    guideLine(svg, widthStart, widthEnd, `${pointBounds.height.toFixed(2)} m`, { x: 20 });
+    guideLine(svg, heightStart, heightEnd, `${height.toFixed(2)} m high`, { x: 42 });
 
     const centre = topPoints.reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }), { x: 0, y: 0 });
     centre.x /= topPoints.length;
     centre.y /= topPoints.length;
-    const roomName = el("text", {
-      x: centre.x,
-      y: centre.y,
-      "text-anchor": "middle",
-      fill: "#164c3a",
-      "font-size": "18",
-      "font-weight": "850",
-      "paint-order": "stroke",
-      stroke: "white",
-      "stroke-width": "4"
-    });
-    roomName.textContent = room.name;
-    const areaLabel = el("text", {
-      x: centre.x,
-      y: centre.y + 22,
-      "text-anchor": "middle",
-      fill: "#164c3a",
-      "font-size": "14",
-      "font-weight": "850",
-      "paint-order": "stroke",
-      stroke: "white",
-      "stroke-width": "3"
-    });
-    areaLabel.textContent = `${floorArea.toFixed(2)} m² floor / ${height.toFixed(2)} m high`;
-    svg.append(roomName, areaLabel);
+    label(svg, room.name, centre.x, centre.y - 6, { size: "17" });
+    label(svg, `${floorArea.toFixed(2)} m² floor`, centre.x, centre.y + 16, { size: "13", strokeWidth: "3" });
+    updateMeasurementStrip(room, points, height, floorArea);
 
     if (note) {
       note.textContent = room.source === "manual"
@@ -318,6 +373,7 @@
         <button id="arqis3dRefresh" type="button">Refresh 3D</button>
       </div>
       <svg class="arqis-3d-svg" id="arqis3dPreview" viewBox="0 0 620 340" role="img" aria-label="3D room preview"></svg>
+      <div class="arqis-3d-measurements" id="arqis3dMeasurements" aria-label="3D room measurements"></div>
       <p class="arqis-3d-note" id="arqis3dNote"></p>
     `;
     roomCard.after(card);
