@@ -38,20 +38,20 @@
   const previousDwgAnalysis = window.directDwgAnalysis;
   window.directDwgAnalysis = function (status, message, shapes = [], floors = []) {
     const filteredFloors = floorCandidatesFrom(shapes, floors);
-    const nextMessage = filteredFloors.length
-      ? `${message} ARQIS has separated the converted CAD geometry into likely plan views first, so elevations and sections are less likely to appear as rooms.`
-      : message;
-
-    if (typeof window.directRenderFloors === "function" && filteredFloors.length >= 2) {
-      if (window.directRenderFloors(status, nextMessage, filteredFloors)) return;
-    }
+    const candidateCount = filteredFloors.length
+      ? filteredFloors.reduce((sum, floor) => sum + (floor.shapes?.length || 0), 0)
+      : shapes.length;
+    const nextMessage = candidateCount
+      ? `${message} ARQIS found ${candidateCount} converted CAD outline${candidateCount === 1 ? "" : "s"}, but it has kept them in review mode. Trace or accept a room before using it for costing.`
+      : `${message} No usable room outlines were accepted from this CAD file.`;
 
     if (typeof window.showCadAnalysis === "function") {
       window.showCadAnalysis({
-        status,
+        status: "CAD converted - review needed",
         message: nextMessage,
-        shapes,
-        floors: filteredFloors
+        shapes: [],
+        floors: [],
+        manageRooms: false
       });
       return;
     }
